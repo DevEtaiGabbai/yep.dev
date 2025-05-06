@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --foreground-rgb: 0, 0, 0;
+  --background-start-rgb: 214, 219, 220;
+  --background-end-rgb: 255, 255, 255;
+  --background: 0 0% 100%;
+  --foreground: 222.2 84% 4.9%;
+  
+  /* Updated color scheme from ChatPanel and Markdown */
+  --app-background: #101012;
+  --panel-background: #161618;
+  --panel-background-darker: #101012;
+  --panel-border: #313133;
+  --text-primary: #f3f6f6;
+  --text-secondary: #969798;
+  
+  --card: 0 0% 100%;
+  --card-foreground: 222.2 84% 4.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 84% 4.9%;
+  --primary: 221.2 83.2% 53.3%;
+  --primary-foreground: 210 40% 98%;
+  --secondary: 210 40% 96.1%;
+  --secondary-foreground: 222.2 47.4% 11.2%;
+  --muted: 210 40% 96.1%;
+  --muted-foreground: 215.4 16.3% 46.9%;
+  --accent: 210 40% 96.1%;
+  --accent-foreground: 222.2 47.4% 11.2%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 221.2 83.2% 53.3%;
+  --radius: 0.5rem;
+  --chat-padding: 16px;
+  --max-width-chat: 800px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --foreground-rgb: 255, 255, 255;
+    --background-start-rgb: 0, 0, 0;
+    --background-end-rgb: 0, 0, 0;
+    --background: #101012;
+    --foreground: #f3f6f6;
+    --card: #161618;
+    --card-foreground: #f3f6f6;
+    --popover: #161618;
+    --popover-foreground: #f3f6f6;
+    --primary: #3b82f6;
+    --primary-foreground: #161618;
+    --secondary: #212122;
+    --secondary-foreground: #f3f6f6;
+    --muted: #212122;
+    --muted-foreground: #969798;
+    --accent: #212122;
+    --accent-foreground: #f3f6f6;
+    --destructive: #991b1b;
+    --destructive-foreground: #f3f6f6;
+    --border: #313133;
+    --input: #212122;
+    --ring: #3b82f6;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    color: var(--text-primary);
+    background: var(--app-background);
+  }
+}
+
+@layer utilities {
+  .text-text-primary {
+    color: var(--text-primary);
+  }
+  
+  .text-text-secondary {
+    color: var(--text-secondary);
+  }
+  
+  .bg-panel {
+    background-color: var(--panel-background);
+  }
+  
+  .bg-panel-darker {
+    background-color: var(--panel-background-darker);
+  }
+  
+  .border-panel {
+    border-color: var(--panel-border);
+  }
+}
+
+@layer components {
+  .rounded-panel {
+    @apply bg-card rounded-lg shadow-lg border border-[var(--panel-border)];
+  }
+  
+  .panel-header {
+    @apply bg-[var(--panel-background-darker)] p-3 border-b border-[var(--panel-border)];
+  }
+  
+  /* Custom scrollbar styles */
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
+}
