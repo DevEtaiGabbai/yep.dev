@@ -8,7 +8,7 @@ import { useWebContainer } from '@/hooks/useWebContainer';
 import { cn } from '@/lib/utils';
 import { MAX_TERMINALS } from '@/stores/terminal';
 
-// Import styles (ensure these are loaded in your global CSS or appropriate location)
+// Import styles
 import '@xterm/xterm/css/xterm.css';
 
 export interface TerminalRef {
@@ -17,6 +17,7 @@ export interface TerminalRef {
   clearTerminal: () => void;
   focus: () => void;
   getDimensions: () => { cols: number; rows: number };
+  resize: () => void;
 }
 
 interface TerminalProps {
@@ -103,20 +104,50 @@ export const Terminal = forwardRef<TerminalRef, TerminalProps>(
 
         // Handle command input
         let currentCommand = '';
+        let commandHistory: string[] = [];
+        let historyIndex = -1;
         
         term.onData((data) => {
           if (data === '\r') { // Enter key
             if (currentCommand.trim()) {
               onCommand?.(currentCommand);
               runTerminalCommand?.(currentCommand, id);
+              commandHistory.push(currentCommand);
+              historyIndex = commandHistory.length;
             }
             currentCommand = '';
           } else if (data === '\u007F') { // Backspace key
             if (currentCommand.length > 0) {
               currentCommand = currentCommand.slice(0, -1);
+              term.write('\b \b'); // Move back, write space, move back again
+            }
+          } else if (data === '\u001b[A') { // Up arrow
+            if (historyIndex > 0) {
+              historyIndex--;
+              // Clear current line
+              while (currentCommand.length > 0) {
+                term.write('\b \b');
+                currentCommand = currentCommand.slice(0, -1);
+              }
+              currentCommand = commandHistory[historyIndex];
+              term.write(currentCommand);
+            }
+          } else if (data === '\u001b[B') { // Down arrow
+            // Clear current line
+            while (currentCommand.length > 0) {
+              term.write('\b \b');
+              currentCommand = currentCommand.slice(0, -1);
+            }
+            if (historyIndex < commandHistory.length - 1) {
+              historyIndex++;
+              currentCommand = commandHistory[historyIndex];
+              term.write(currentCommand);
+            } else {
+              historyIndex = commandHistory.length;
             }
           } else if (data >= ' ' || data === '\t') { // Printable characters
             currentCommand += data;
+            term.write(data);
           }
           
           setCommand(currentCommand);
@@ -174,8 +205,15 @@ export const Terminal = forwardRef<TerminalRef, TerminalProps>(
       getDimensions: () => ({
         cols: terminal?.cols || 80,
         rows: terminal?.rows || 24
-      })
-    }), [terminal]);
+      }),
+      resize: () => {
+        if (terminal && fitAddonRef.current) {
+          fitAddonRef.current.fit();
+          const { cols, rows } = terminal;
+          onResize?.(cols, rows);
+        }
+      }
+    }), [terminal, onResize]);
 
     return (
       <div 

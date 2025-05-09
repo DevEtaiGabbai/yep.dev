@@ -34,7 +34,7 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
   const [activeTab, setActiveTab] = useState('main');
   const [isResizing, setIsResizing] = useState(false);
   const [terminals, setTerminals] = useState<{ id: string; label: string }[]>([
-    { id: 'main', label: 'Terminal' }
+    { id: 'main', label: 'Bolt' }
   ]);
   
   // Create refs for each terminal
@@ -48,7 +48,8 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
     isInitializingWebContainer,
     isInstallingDeps,
     isStartingDevServer,
-    webContainerURL
+    webContainerURL,
+    runTerminalCommand
   } = useWebContainer(terminalRefs.current['main'] as React.MutableRefObject<TerminalRef | null>);
 
   // Initialize refs for each terminal tab
