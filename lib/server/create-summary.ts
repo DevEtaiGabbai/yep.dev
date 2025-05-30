@@ -1,8 +1,8 @@
+import type { Env, IProviderSetting } from '@/lib/types/index';
 import { generateText, type CoreTool, type GenerateTextResult, type Message } from 'ai';
 import { SECONDARY_MODEL } from '../constants';
 import { DEFAULT_PROVIDER } from '../provider';
 import { extractCurrentContext, extractPropertiesFromMessage, simplifyBoltActions } from './serverUtils';
-import type { Env, IProviderSetting } from '@/types/index';
 
 export async function createSummary(props: {
   messages: Message[];
@@ -34,7 +34,7 @@ export async function createSummary(props: {
   });
 
   const provider = DEFAULT_PROVIDER;
-  
+
   let slicedMessages = processedMessages;
   const { summary } = extractCurrentContext(processedMessages);
   let summaryText: string | undefined = undefined;
@@ -42,8 +42,8 @@ export async function createSummary(props: {
 
   if (summary && summary.type === 'chatSummary') {
     chatId = (summary as any).chatId;
-    summaryText = `Below is the Chat Summary till now, this is chat summary before the conversation provided by the user 
-you should also use this as historical message while providing the response to the user.        
+    summaryText = `Below is the Chat Summary till now, this is chat summary before the conversation provided by the user
+you should also use this as historical message while providing the response to the user.
 ${(summary as any).summary}`;
 
     if (chatId) {
@@ -119,7 +119,7 @@ Note:
 
 
 ---
-        
+
         RULES:
         * Only provide the whole summary of the chat till now.
         * Do not provide any new information.
@@ -130,7 +130,7 @@ Note:
 
 Here is the previous summary of the chat:
 <old_summary>
-${summaryText} 
+${summaryText}
 </old_summary>
 
 Below is the chat after that:

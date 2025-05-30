@@ -1,208 +1,153 @@
+// components/EditorPanel.tsx
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { FileTree } from '@/components/FileTree';
-import { CodeEditor } from '@/components/Editor';
-import { FileEntry } from '@/types';
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '@/components/ui/resizable';
-import { cn } from '@/lib/utils';
-import { Skeleton } from './ui/skeleton';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Icons } from './ui/icons';
-import { ShimmerLine } from '@/components/ui/shimmer-line';
-import { ShimmerText } from '@/components/ui/text-shimmer';
-import { FileTreeShimmer } from '@/components/ui/file-tree-shimmer';
+import {
+  $workbench, handleEditorContentChange, // Import the main store
+  setSelectedFile as setSelectedWorkbenchFile
+} from '@/app/lib/stores/workbenchStore';
+import { useStore } from '@nanostores/react';
+
+import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
+
+// import { useWebContainer } from '@/hooks/useWebContainer'; // Not directly needed if save/reset are higher up
+// import { toast } from '../ui/use-toast'; // Toasts are handled higher up
+import FileExplorer from '@/app/components/chat/FileExplorer';
+import { WORK_DIR } from '@/lib/prompt';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@radix-ui/react-tabs';
+import { useCallback, useEffect, useMemo, useRef } from 'react'; // Added useCallback
+import CodeEditor2 from './chat/CodeEditor2';
+import { FileBreadcrumb } from './chat/FileBreadcrumb';
+import { SearchPanel } from './SearchPanel';
+import { ScrollArea } from '@/components/ui/scroll-area';
 
 interface EditorPanelProps {
-  files: Record<string, FileEntry>;
-  selectedFile: string | null;
-  setSelectedFile: (file: string | null) => void;
-  onUpdateFile: (path: string, content: string) => void;
-  loadFileContent?: (path: string) => Promise<string>;
-  isStreaming?: boolean;
-  isLoadingGitHubFiles?: boolean;
-  rateLimit?: { resetTime?: Date };
+  // EditorPanel will now mostly read from the $workbench store.
+  // We might still pass down specific interaction handlers if they don't belong in the store.
+  isStreaming?: boolean; // Example: To make editor read-only during AI generation
+  // onFileSave: () => void; // Moved to Workbench.tsx header
+  // onFileReset: () => void; // Moved to Workbench.tsx header
 }
 
-export function EditorPanel({
-  files,
-  selectedFile,
-  setSelectedFile,
-  onUpdateFile,
-  loadFileContent,
-  isStreaming = false,
-  isLoadingGitHubFiles = false,
-}: EditorPanelProps) {
-  // Use local state to prevent the file selection from being lost
-  const [stableFile, setStableFile] = useState<string | null>(selectedFile);
-  
-  // When the parent component updates selectedFile, update our stable state
+export function EditorPanel({ isStreaming }: EditorPanelProps) {
+  const workbenchState = useStore($workbench);
+  const { files, selectedFile, currentDocument, unsavedFiles } = workbenchState;
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
+  const handleFileSelectInTree = useCallback((filePath: string | undefined) => {
+    setSelectedWorkbenchFile(filePath || null);
+  }, []);
+
+
+  const handleEditorChange = useCallback((newContent: string) => {
+    handleEditorContentChange(newContent);
+  }, []);
+
+
+  const activeFileSegments = useMemo(() => {
+    if (!currentDocument?.filePath) return [];
+    // Ensure WORK_DIR is correctly used for relative path calculation
+    const pathWithoutWorkDir = currentDocument.filePath.startsWith(WORK_DIR + '/')
+      ? currentDocument.filePath.substring(WORK_DIR.length + 1)
+      : currentDocument.filePath.replace(/^\//, '');
+
+    return [WORK_DIR.split('/').pop() || 'project', ...pathWithoutWorkDir.split('/')].filter(Boolean);
+  }, [currentDocument?.filePath]);
+
+
+  const scrollToBottom = () => {
+    if (chatContainerRef.current) {
+      const scrollContainer = chatContainerRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollContainer) {
+        scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      }
+    }
+  };
+
+
+  const handleScroll = () => {
+    if (chatContainerRef.current) {
+      const scrollContainer = chatContainerRef.current.querySelector('[data-radix-scroll-area-viewport]');
+      if (scrollContainer) {
+        const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
+        // Consider "at bottom" if within 50px of the bottom
+      }
+    }
+  };
+
   useEffect(() => {
-    if (selectedFile) {
-      setStableFile(selectedFile);
+    scrollToBottom();
+
+    // Add scroll event listener
+    const scrollContainer = chatContainerRef.current?.querySelector('[data-radix-scroll-area-viewport]');
+    if (scrollContainer) {
+      scrollContainer.addEventListener('scroll', handleScroll);
+      return () => scrollContainer.removeEventListener('scroll', handleScroll);
     }
-  }, [selectedFile]);
-  
-  // Memoized handler to update both our stable state and notify parent
-  const handleSelectFile = useCallback((file: string) => {
-    // If streaming, don't allow switching files
-    if (isStreaming) {
-      return;
-    }
-    setStableFile(file);
-    setSelectedFile(file);
-  }, [setSelectedFile, isStreaming]);
-  
-  // Calculate loading progress for demo purposes - in a real app, this would come from actual file loading progress
-  const [loadingProgress, setLoadingProgress] = useState(0);
-  
-  // Simulate loading progress when loading files
-  useEffect(() => {
-    if (isLoadingGitHubFiles) {
-      setLoadingProgress(0);
-      const interval = setInterval(() => {
-        setLoadingProgress(prev => {
-          // Cap at 90% to show we're still waiting for something
-          if (prev >= 90) {
-            clearInterval(interval);
-            return 90;
-          }
-          return prev + Math.random() * 10;
-        });
-      }, 400);
-      
-      return () => clearInterval(interval);
-    } else {
-      // When loading is done, jump to 100%
-      setLoadingProgress(100);
-    }
-  }, [isLoadingGitHubFiles]);
-  
+  }, []);
+
+
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex-1 flex overflow-hidden">
-        <ResizablePanelGroup direction="horizontal">
-          <ResizablePanel 
-            defaultSize={20} 
-            minSize={12} 
-            maxSize={30}
-            className="bg-[#161618] min-h-0 shadow-sm"
-          >
-            <AnimatePresence mode="wait">
-              {isLoadingGitHubFiles ? (
-                <motion.div 
-                  key="loading"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  <div className="py-2 px-3 flex-shrink-0 border-b border-[#2a2a2c]">
-                    <h3 className="text-xs font-medium text-[#f3f6f6] flex items-center gap-1.5">
-                      <ShimmerText className="text-xs">Loading files</ShimmerText>
-                    </h3>
-                  </div>
-                  <FileTreeShimmer />
-                </motion.div>
-              ) : (
-                <motion.div 
-                  key="content"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="h-full flex flex-col overflow-hidden"
-                >
-                  <div className="py-2 px-3 flex-shrink-0 border-b border-[#2a2a2c]">
-                    <h3 className="text-xs font-medium text-[#f3f6f6] flex items-center gap-1.5">
-                      <AnimatePresence mode="wait">
-                        {isStreaming ? (
-                          <motion.span
-                            key="streaming"
-                            initial={{ opacity: 0, scale: 0.9 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            exit={{ opacity: 0, scale: 0.9 }}
-                            transition={{ duration: 0.2 }}
-                            className="flex items-center gap-1.5"
-                          >
-                            <Icons.sparkles className="w-3.5 h-3.5 text-[#969798] animate-pulse" />
-                            <ShimmerText className="text-xs">AI Editing</ShimmerText>
-                          </motion.span>
-                        ) : (
-                          <motion.span
-                            key="files"
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            exit={{ opacity: 0 }}
-                            transition={{ duration: 0.2 }}
-                          >
-                            Files
-                          </motion.span>
-                        )}
-                      </AnimatePresence>
-                    </h3>
-                  </div>
-                  <div className="flex-1 min-h-0 overflow-hidden">
-                    <FileTree
-                      files={files}
-                      selectedFile={stableFile}
-                      onSelectFile={handleSelectFile}
-                      isStreaming={isStreaming}
-                    />
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </ResizablePanel>
+    <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
+      <ResizablePanel defaultSize={25} minSize={15} className="bg-[#101012] flex flex-col min-w-[200px]">
+        <Tabs defaultValue="files" className="flex flex-col flex-1 h-full overflow-hidden">
+          <TabsList className="bg-[#101012] border-b border-[#313133] rounded-none justify-start px-2 h-10">
+            <TabsTrigger value="files" className="px-3 py-1.5 text-xs data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]">Files</TabsTrigger>
+            <TabsTrigger value="search" className="px-3 py-1.5 text-xs data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]">Search</TabsTrigger>
+            {/* <TabsTrigger value="locks" className="px-3 py-1.5 text-xs data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]">Locks</TabsTrigger> */}
+          </TabsList>
+          <ScrollArea className="h-full bg-[#101012]" ref={chatContainerRef}>
+            <TabsContent value="files" className="flex-1 mt-0 p-1">
 
-          <ResizableHandle 
-            className="w-[1px] bg-[#2a2a2c] data-[hover]:bg-[#3a3a3c] transition-colors"
-          />
-
-          <ResizablePanel defaultSize={80} className="min-h-0 bg-[#161618]">
-            <AnimatePresence mode="wait">
-              {isLoadingGitHubFiles ? (
-                <div className="min-h-screen bg-[#161618] p-4 font-mono">
-                <div className="max-w-4xl mx-auto">
-                  {/* Tab bar */}
-                  <div className="flex gap-2 border-b border-[#2D2D2D] pb-3 mb-3 w-full">
-                    <Skeleton className="h-4 w-[120px] bg-[#2D2D2D]" />
-                    <Skeleton className="h-4 w-[100px] bg-[#2D2D2D]" />
-                  </div>
-          
-                  {/* Code lines */}
-                  <div className="space-y-2">
-                    {Array.from({ length: 20 }).map((_, i) => (
-                      <div key={i} className="flex items-center gap-4">
-                        <Skeleton className="w-8 h-4 bg-[#2D2D2D]" />
-                        <ShimmerLine width={`${20 + ((i * 13) % 40)}%`} />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
+              {Object.keys(files).length === 0 ? (
+                <div className="text-center text-xs text-[#969798] pt-4">No files in project.</div>
               ) : (
-                <motion.div 
-                  key="editor-content"
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.2 }}
-                  className="h-full rounded-md shadow-sm overflow-hidden"
-                >
-                  <CodeEditor
-                    selectedFile={stableFile}
-                    files={files}
-                    onUpdateFile={onUpdateFile}
-                    loadFileContent={loadFileContent}
-                    isStreaming={isStreaming}
-                  />
-                </motion.div>
+                <FileExplorer
+                  files={Object.keys(files)} // Pass only paths
+                  selectedFile={selectedFile}
+                  onSelectFile={handleFileSelectInTree}
+                />
               )}
-            </AnimatePresence>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </div>
-    </div>
+            </TabsContent>
+          </ScrollArea>
+          <TabsContent value="search" className="flex-1 overflow-auto mt-0">
+            <SearchPanel />
+          </TabsContent>
+          {/* <TabsContent value="locks" className="flex-1 overflow-auto mt-0">
+            <LockManager />
+          </TabsContent> */}
+        </Tabs>
+      </ResizablePanel>
+      <ResizableHandle className="w-[1px] bg-[#313133]" />
+      <ResizablePanel defaultSize={75} className="bg-[#101012] flex flex-col min-w-0">
+        <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#313133] bg-[#161618] flex-shrink-0 h-10">
+          {currentDocument?.filePath ? (
+            <FileBreadcrumb
+              pathSegments={activeFileSegments}
+              onFileSelect={handleFileSelectInTree}
+            />
+          ) : (
+            <span className="text-xs text-[#969798]">No file selected</span>
+          )}
+        </div>
+        <div className="flex-1 relative min-h-0">
+          {currentDocument?.filePath && currentDocument && !currentDocument.isBinary ? (
+            <CodeEditor2
+              value={currentDocument.value}
+              onChange={handleEditorChange}
+              language={currentDocument.language || 'plaintext'}
+            // readOnly={isStreaming || currentDocument.isLocked}
+            />
+          ) : currentDocument?.isBinary ? (
+            <div className="flex items-center justify-center h-full text-[#969798] text-sm">
+              Binary file. Cannot be displayed.
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full text-[#969798] text-sm">
+              Select a file to edit or view.
+            </div>
+          )}
+        </div>
+      </ResizablePanel>
+    </ResizablePanelGroup>
   );
 }

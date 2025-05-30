@@ -1,3 +1,4 @@
+//usePromptEnhancer.ts
 'use client';
 
 import { useState } from 'react';
@@ -23,7 +24,7 @@ export function usePromptEnhancer() {
     provider: ProviderInfo,
   ) => {
     if (!input.trim()) return;
-    
+
     setEnhancingPrompt(true);
     setPromptEnhanced(false);
 
@@ -68,21 +69,21 @@ export function usePromptEnhancer() {
 
           const chunk = decoder.decode(value, { stream: true });
           const lines = chunk.split('\n');
-          
+
           for (const line of lines) {
             if (line.trim() === '' || !line.startsWith('data: ')) continue;
-            
+
             const data = line.slice(6);
             if (data === '[DONE]') continue;
-            
+
             try {
               const json = JSON.parse(data);
               const token = json.choices?.[0]?.delta?.content || '';
-              
+
               if (token) {
                 enhancedInput += token;
                 console.log('Enhanced token:', token);
-                
+
                 // Update input in real-time
                 setInput(enhancedInput);
               }
@@ -91,7 +92,7 @@ export function usePromptEnhancer() {
             }
           }
         }
-        
+
         // Final update
         if (enhancedInput.trim()) {
           setInput(enhancedInput);
@@ -114,4 +115,4 @@ export function usePromptEnhancer() {
   };
 
   return { enhancingPrompt, promptEnhanced, enhancePrompt, resetEnhancer };
-} 
+}

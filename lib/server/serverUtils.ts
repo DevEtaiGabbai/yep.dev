@@ -1,9 +1,8 @@
 import { type Message } from 'ai';
-import { DEFAULT_MODEL } from '../constants';
-import { IGNORE_PATTERNS, type FileMap } from '../constants';
-import { DEFAULT_PROVIDER } from '../provider';
 import ignore from 'ignore';
-import type { ContextAnnotation } from '../../types/index';
+import { DEFAULT_MODEL, IGNORE_PATTERNS, type FileMap } from '../constants';
+import { DEFAULT_PROVIDER } from '../provider';
+import type { ContextAnnotation } from '../types/index';
 
 const MODEL_REGEX = /^\[Model: (.*?)\]\n\n/;
 const PROVIDER_REGEX = /\[Provider: (.*?)\]\n\n/;
@@ -75,6 +74,11 @@ export function createFilesContext(files: FileMap, useRelativePath?: boolean) {
         return '';
       }
 
+      if (!dirent.content) {
+        console.warn(`Missing content for file: ${path}`);
+        return `<boltAction type="file" filePath="${path}">// File content not available</boltAction>`;
+      }
+
       const codeWithLinesNumbers = dirent.content
         .split('\n')
         // .map((v, i) => `${i + 1}|${v}`)
@@ -121,10 +125,10 @@ export function extractCurrentContext(messages: Message[]) {
 
     if (annotationObject.type === 'codeContext') {
       codeContext = annotationObject;
-      break;
+      // break;
     } else if (annotationObject.type === 'chatSummary') {
       summary = annotationObject;
-      break;
+      // break;
     }
   }
 

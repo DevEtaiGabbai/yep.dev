@@ -1,10 +1,18 @@
-import { Template } from '../types/index';
+import { Template } from './types/index';
 
-export const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-// export const DEFAULT_MODEL = 'google/gemini-2.5-pro-preview-03-25';
-export const DEFAULT_MODEL = 'openai/gpt-4.1';
+export const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/1completions1';
+// export const DEFAULT_MODEL = 'google/gemma-3-4b-it';
+// export const DEFAULT_MODEL = 'deepseek/deepseek-r1:free';
+// export const DEFAULT_MODEL = 'google/gemini-2.0-flash-001';
+// export const DEFAULT_MODEL = 'meta-llama/llama-3.3-8b-instruct:free';
+// export const DEFAULT_MODEL = 'google/gemini-2.0-flash-exp:free';
+// export const DEFAULT_MODEL = 'meta-llama/llama-4-maverick:free';
+// export const DEFAULT_MODEL = "google/gemma-3-4b-it:free"
 
-export const SECONDARY_MODEL = 'google/gemini-2.0-flash-001';
+export const DEFAULT_MODEL = 'deepseek/deepseek-chat-v3-0324:free';
+
+// export const SECONDARY_MODEL = 'google/gemini-2.0-flash-001';
+export const SECONDARY_MODEL = 'qwen/qwen3-14b:free';
 export const GITHUB_REPO_URL = 'https://github.com/thecodacus/bolt-nextjs-shadcn-template.git';
 export const GITHUB_API_BASE_URL = 'https://api.github.com';
 export const MAX_TOKENS_NO_SUMMARY = 8000; // Maximum tokens before requiring chat summary
@@ -26,6 +34,23 @@ export const IGNORE_PATTERNS = [
     '**/*lock.json',
     '**/*lock.yml',
 ];
+
+export interface File {
+  type: 'file';
+  content: string;
+  isBinary: boolean;
+  isLocked?: boolean;
+  lockedByFolder?: string;
+}
+
+export interface Folder {
+  type: 'folder';
+  isLocked?: boolean;
+  lockedByFolder?: string;
+}
+
+type Dirent = File | Folder;
+export type FileMap = Record<string, Dirent | undefined>;
 
 export const STARTER_TEMPLATES: Template[] = [
   {
@@ -87,7 +112,7 @@ export const STARTER_TEMPLATES: Template[] = [
 ];
 
 // Default template when user enters prompt without selecting a template
-export const DEFAULT_TEMPLATE = STARTER_TEMPLATES.find(t => t.name === 'bolt-nextjs-shadcn') || STARTER_TEMPLATES[0]; 
+export const DEFAULT_TEMPLATE = STARTER_TEMPLATES.find(t => t.name === 'bolt-nextjs-shadcn1') || STARTER_TEMPLATES[2];
 
 // Maximum time in milliseconds to wait for a terminal command to complete
-export const MAX_TERMINAL_EXECUTION_TIME = 15000; // 15 seconds 
+export const MAX_TERMINAL_EXECUTION_TIME = 15000; // 15 seconds

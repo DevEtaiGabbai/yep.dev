@@ -1,6 +1,15 @@
 import type { WebContainer, WebContainerProcess } from '@webcontainer/api';
-import type { Terminal } from '@xterm/xterm';
+import type { Terminal as XTermTerminal } from '@xterm/xterm'; // Renamed to XTermTerminal to avoid conflict
 import { atom } from 'nanostores';
+
+// Safer browser detection that doesn't cause SSR issues
+const isBrowser = (() => {
+  try {
+    return typeof window !== 'undefined' && typeof self !== 'undefined';
+  } catch {
+    return false;
+  }
+})();
 
 // Helper function to create a promise with externally accessible resolve/reject
 function withResolvers<T>() {
@@ -13,10 +22,9 @@ function withResolvers<T>() {
   return { promise, resolve: resolve!, reject: reject! };
 }
 
-export async function newShellProcess(webcontainer: WebContainer, terminal: Terminal) {
+export async function newShellProcess(webcontainer: WebContainer, terminal: XTermTerminal) { // Use XTermTerminal type
   const args: string[] = [];
 
-  // we spawn a JSH process with a fallback cols and rows in case the process is not attached yet to a visible terminal
   const process = await webcontainer.spawn('/bin/jsh', ['--osc', ...args], {
     terminal: {
       cols: terminal.cols ?? 80,
@@ -35,37 +43,30 @@ export async function newShellProcess(webcontainer: WebContainer, terminal: Term
       write(data) {
         if (!isInteractive) {
           const [, osc] = data.match(/\x1b\]654;([^\x07]+)\x07/) || [];
-
           if (osc === 'interactive') {
-            // wait until we see the interactive OSC
             isInteractive = true;
-
             jshReady.resolve();
           }
         }
-
         terminal.write(data);
       },
     }),
   );
 
   terminal.onData((data) => {
-    // console.log('terminal onData', { data, isInteractive });
-
     if (isInteractive) {
       input.write(data);
     }
   });
 
   await jshReady.promise;
-
   return process;
 }
 
 export type ExecutionResult = { output: string; exitCode: number } | undefined;
 
 export class BoltShell {
-  private _terminal: Terminal | null = null;
+  private _terminal: XTermTerminal | null = null; // Use XTermTerminal type
   private _process: WebContainerProcess | null = null;
   private _webcontainer: WebContainer | null = null;
   executionState = atom<
@@ -73,10 +74,12 @@ export class BoltShell {
   >();
   private outputStream: ReadableStreamDefaultReader<string> | undefined;
   private shellInputStream: WritableStreamDefaultWriter<string> | undefined;
+  private initialized = false;
+  private isInteractive = false;
 
-  constructor() {}
+  constructor() { }
 
-  get terminal(): Terminal | null {
+  get terminal(): XTermTerminal | null { // Use XTermTerminal type
     return this._terminal;
   }
 
@@ -84,366 +87,369 @@ export class BoltShell {
     return this._process;
   }
 
-  async init(webcontainer: WebContainer, terminal: Terminal) {
-    if (this._process) {
-      console.warn('BoltShell already initialized.');
-      return;
-    }
-    this._webcontainer = webcontainer;
-    this._terminal = terminal;
-
-    console.log('BoltShell: Spawning shell process...');
-    try {
-      // Ensure we have valid dimensions, use defaults if not available
-      const cols = this._terminal.cols || 80;
-      const rows = this._terminal.rows || 24;
-      
-      console.log(`BoltShell: Using terminal dimensions ${cols}x${rows}`);
-      
-      this._process = await this._webcontainer.spawn('/bin/jsh', ['--osc'], {
-        terminal: {
-          cols,
-          rows,
-        },
-      });
-
-      console.log('BoltShell: Piping output/input...');
-      // Pipe process output to terminal
-      this._process.output.pipeTo(
-        new WritableStream({
-          write: (data) => {
-            this._terminal?.write(data);
-          },
-        })
-      );
-
-      // Pipe terminal input to process
-      const input = this._process.input.getWriter();
-      this._terminal.onData((data) => {
-        input.write(data);
-      });
-
-      console.log('BoltShell: Initialization complete.');
-
-      // Wait for the initial prompt or process exit
-      await Promise.race([
-        this._process.exit,
-        this.waitTillOscCode('prompt') // Wait for the prompt OSC code
-      ]);
-
-      console.log('BoltShell: Initial prompt received or process exited.');
-
-    } catch (error) {
-      console.error('BoltShell: Failed to initialize process', error);
-      this._terminal?.write(`\r\nError spawning shell: ${error}\r\n`);
-      this._process = null; // Ensure process is null on failure
-    }
-  }
-
-  async newBoltShellProcess(webcontainer: WebContainer, terminal: Terminal) {
-    const args: string[] = [];
-    const process = await webcontainer.spawn('/bin/jsh', ['--osc', ...args], {
-      terminal: {
-        cols: terminal.cols ?? 80,
-        rows: terminal.rows ?? 15,
-      },
-    });
-
-    const input = process.input.getWriter();
-    this.shellInputStream = input;
-
-    // Tee the output so we can have three independent readers
-    const [streamA, streamB] = process.output.tee();
-    const [streamC, streamD] = streamB.tee();
-
-    const jshReady = withResolvers<void>();
-    let isInteractive = false;
-    streamA.pipeTo(
-      new WritableStream({
-        write(data) {
-          if (!isInteractive) {
-            const [, osc] = data.match(/\x1b\]654;([^\x07]+)\x07/) || [];
-
-            if (osc === 'interactive') {
-              isInteractive = true;
-              jshReady.resolve();
-            }
-          }
-
-          terminal.write(data);
-        },
-      }),
-    );
-
-    terminal.onData((data) => {
-      if (isInteractive) {
-        input.write(data);
-      }
-    });
-
-    await jshReady.promise;
-
-    // Return all streams for use in init
-    return { process, terminalStream: streamA, commandStream: streamC, expoUrlStream: streamD };
-  }
-
-  // Dedicated background watcher for Expo URL
-  private async _watchExpoUrlInBackground(stream: ReadableStream<string>) {
-    const reader = stream.getReader();
-    let buffer = '';
-    const expoUrlRegex = /(exp:\/\/[^\s]+)/;
-
-    while (true) {
-      const { value, done } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      buffer += value || '';
-
-      if (buffer.length > 2048) {
-        buffer = buffer.slice(-2048);
-      }
-    }
-  }
-
-  get getTerminal() {
-    return this._terminal;
-  }
-
-  get getProcess() {
+  getProcess(): WebContainerProcess | null {
     return this._process;
   }
 
-  async executeCommand(sessionId: string, command: string, abort?: () => void): Promise<ExecutionResult> {
-    if (!this._process || !this._terminal) {
-      return undefined;
+  // Modified init to accept XTermTerminal instance
+  private _commandStreamReader: ReadableStreamDefaultReader<string> | undefined;
+
+  get isInitialized(): boolean {
+    return this.initialized && this._process !== null;
+  }
+
+  async init(webcontainer: WebContainer, xtermInstance: XTermTerminal): Promise<void> {
+    if (this._process) {
+      console.log('BoltShell: Already initialized');
+      return;
     }
 
-    const state = this.executionState.get();
+    this._webcontainer = webcontainer;
+    this._terminal = xtermInstance;
 
-    if (state?.active && state.abort) {
-      state.abort();
+    try {
+      this._process = await this._webcontainer.spawn('/bin/jsh', ['--osc'], {
+        terminal: {
+          cols: xtermInstance.cols ?? 80,
+          rows: xtermInstance.rows ?? 15,
+        },
+      });
+
+      const inputWriter = this._process.input.getWriter();
+      this.shellInputStream = inputWriter;
+
+      const [terminalStream, commandStreamForParsing] = this._process.output.tee();
+
+      // Enhanced terminal stream processing
+      terminalStream.pipeTo(new WritableStream({
+        write: (data) => {
+          this._terminal?.write(data);
+        },
+      })).catch(e => console.error("BoltShell UI pipe error:", e));
+
+      this._commandStreamReader = commandStreamForParsing.getReader();
+
+      this._terminal.onData((data) => {
+        if (this.isInteractive) {
+          inputWriter.write(data).catch(e => console.error("BoltShell input error:", e));
+        }
+      });
+
+      // Wait for the shell to be ready
+      await this.waitTillOscCode('interactive');
+      this.isInteractive = true;
+      this.initialized = true;
+    } catch (error) {
+      console.error('BoltShell: Failed to initialize:', error);
+      this.cleanup();
+      throw error;
+    }
+  }
+
+  async waitTillOscCode(code: string): Promise<ExecutionResult> {
+    if (!this._commandStreamReader) {
+      throw new Error('Command stream reader not available');
     }
 
-    /*
-     * interrupt the current execution
-     *  this.shellInputStream?.write('\x03');
-     */
-    this._terminal.input('\x03');
-    await this.waitTillOscCode('prompt');
+    let output = '';
+    let exitCode: number | undefined;
 
-    if (state && state.executionPrms) {
-      await state.executionPrms;
+    try {
+      while (true) {
+        const { done, value } = await this._commandStreamReader.read();
+
+        if (done) {
+          break;
+        }
+
+        output += value;
+
+        // Look for OSC codes
+        const oscMatch = value.match(/\x1b\]654;([^\x07]+)\x07/);
+        if (oscMatch) {
+          const [, oscData] = oscMatch;
+
+          if (oscData === code) {
+            break;
+          }
+
+          if (oscData.startsWith('exit:')) {
+            exitCode = parseInt(oscData.split(':')[1], 10);
+            if (code === 'exit') {
+              break;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.error(`Error waiting for OSC code ${code}:`, error);
     }
 
-    //start a new execution
-    this._terminal.input(command.trim() + '\n');
+    return { output, exitCode };
+  }
 
-    //wait for the execution to finish
-    const executionPromise = this.waitTillOscCode('prompt');
-    this.executionState.set({ sessionId, active: true, executionPrms: executionPromise, abort });
+  async executeCommand(command: string, sessionId: string = 'main'): Promise<ExecutionResult> {
+    if (!this._process || !this._terminal || !this.isInteractive) {
+      console.warn("BoltShell: executeCommand called but shell not ready");
+      throw new Error('Shell not ready for command execution');
+    }
 
-    const resp = await executionPromise;
-    this.executionState.set({ sessionId, active: false });
+    try {
+      // Send the command
+      if (this.shellInputStream) {
+        await this.shellInputStream.write(command.trim() + '\n');
+      }
 
-    if (resp) {
+      // Wait for command completion
+      const result = await this.waitTillOscCode('exit');
+
+      // Wait for prompt to be ready again
+      await this.waitTillOscCode('prompt');
+
+      return result;
+    } catch (error) {
+      console.error('BoltShell: Error executing command:', error);
+      throw error;
+    }
+  }
+
+  async resize(cols: number, rows: number): Promise<void> {
+    if (this._process) {
       try {
-        resp.output = cleanTerminalOutput(resp.output);
+        await this._process.resize({ cols, rows });
       } catch (error) {
-        console.log('failed to format terminal output', error);
+        console.warn('BoltShell: Error resizing:', error);
       }
     }
+  }
 
-    return resp;
+  async restore(xtermInstance: XTermTerminal): Promise<void> {
+    console.log('BoltShell: Restoring with new XTerm instance');
+    this._terminal = xtermInstance;
+
+    if (this._process && this.isInteractive) {
+      console.log('BoltShell: Reconnecting terminal to existing process');
+
+      // Re-establish terminal connection with the existing process
+      try {
+        const [terminalStream, commandStreamForParsing] = this._process.output.tee();
+
+        terminalStream.pipeTo(new WritableStream({
+          write: (data) => {
+            this._terminal?.write(data);
+          },
+        })).catch(e => console.error("BoltShell restore UI pipe error:", e));
+
+        this._commandStreamReader = commandStreamForParsing.getReader();
+
+        this._terminal.onData((data) => {
+          if (this.isInteractive && this.shellInputStream) {
+            this.shellInputStream.write(data).catch(e => console.error("BoltShell restore input error:", e));
+          }
+        });
+
+        console.log('BoltShell: Terminal restored successfully');
+      } catch (error) {
+        console.error('BoltShell: Error during restore:', error);
+        throw error;
+      }
+    } else {
+      console.warn('BoltShell: Cannot restore - no active process or not interactive');
+    }
+  }
+
+  cleanup(): void {
+    console.log('BoltShell: Cleaning up...');
+
+    try {
+      if (this._commandStreamReader) {
+        this._commandStreamReader.releaseLock();
+        this._commandStreamReader = undefined;
+      }
+    } catch (e) {
+      console.warn('BoltShell: Error releasing command stream reader:', e);
+    }
+
+    try {
+      if (this.shellInputStream) {
+        this.shellInputStream.releaseLock();
+        this.shellInputStream = undefined;
+      }
+    } catch (e) {
+      console.warn('BoltShell: Error releasing shell input stream:', e);
+    }
+
+    try {
+      if (this._process) {
+        this._process.kill();
+        this._process = null;
+      }
+    } catch (e) {
+      console.warn('BoltShell: Error killing process:', e);
+    }
+
+    this._terminal = null;
+    this._webcontainer = null;
+    this.initialized = false;
+    this.isInteractive = false;
   }
 
   onQRCodeDetected?: (qrCode: string) => void;
-
-  async waitTillOscCode(waitCode: string) {
-    let fullOutput = '';
-    let exitCode: number = 0;
-    let buffer = ''; // <-- Add a buffer to accumulate output
-
-    if (!this.outputStream) {
-      return { output: fullOutput, exitCode };
-    }
-
-    const tappedStream = this.outputStream;
-
-    while (true) {
-      const { value, done } = await tappedStream.read();
-
-      if (done) {
-        break;
-      }
-
-      const text = value || '';
-      fullOutput += text;
-      buffer += text; // <-- Accumulate in buffer
-
-      // Extract Expo URL from buffer and set store
-
-
-      // Check if command completion signal with exit code
-      const [, osc, , , code] = text.match(/\x1b\]654;([^\x07=]+)=?((-?\d+):(\d+))?\x07/) || [];
-
-      if (osc === 'exit') {
-        exitCode = parseInt(code, 10);
-      }
-
-      if (osc === waitCode) {
-        break;
-      }
-    }
-
-    return { output: fullOutput, exitCode };
-  }
-
-  // Public method to resize the underlying shell process
-  resize(cols: number, rows: number) {
-    this._process?.resize({ cols, rows });
-  }
 }
 
-/**
- * Cleans and formats terminal output while preserving structure and paths
- * Handles ANSI, OSC, and various terminal control sequences
- */
 export function cleanTerminalOutput(input: string): string {
-  // Step 1: Remove OSC sequences (including those with parameters)
   const removeOsc = input
     .replace(/\x1b\](\d+;[^\x07\x1b]*|\d+[^\x07\x1b]*)\x07/g, '')
     .replace(/\](\d+;[^\n]*|\d+[^\n]*)/g, '');
-
-  // Step 2: Remove ANSI escape sequences and color codes more thoroughly
   const removeAnsi = removeOsc
-    // Remove all escape sequences with parameters
     .replace(/\u001b\[[\?]?[0-9;]*[a-zA-Z]/g, '')
     .replace(/\x1b\[[\?]?[0-9;]*[a-zA-Z]/g, '')
-    // Remove color codes
     .replace(/\u001b\[[0-9;]*m/g, '')
     .replace(/\x1b\[[0-9;]*m/g, '')
-    // Clean up any remaining escape characters
     .replace(/\u001b/g, '')
     .replace(/\x1b/g, '');
-
-  // Step 3: Clean up carriage returns and newlines
   const cleanNewlines = removeAnsi
     .replace(/\r\n/g, '\n')
     .replace(/\r/g, '\n')
     .replace(/\n{3,}/g, '\n\n');
-
-  // Step 4: Add newlines at key breakpoints while preserving paths
   const formatOutput = cleanNewlines
-    // Preserve prompt line
     .replace(/^([~\/][^\n❯]+)❯/m, '$1\n❯')
-    // Add newline before command output indicators
     .replace(/(?<!^|\n)>/g, '\n>')
-    // Add newline before error keywords without breaking paths
     .replace(/(?<!^|\n|\w)(error|failed|warning|Error|Failed|Warning):/g, '\n$1:')
-    // Add newline before 'at' in stack traces without breaking paths
     .replace(/(?<!^|\n|\/)(at\s+(?!async|sync))/g, '\nat ')
-    // Ensure 'at async' stays on same line
     .replace(/\bat\s+async/g, 'at async')
-    // Add newline before npm error indicators
     .replace(/(?<!^|\n)(npm ERR!)/g, '\n$1');
-
-  // Step 5: Clean up whitespace while preserving intentional spacing
   const cleanSpaces = formatOutput
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.length > 0)
     .join('\n');
-
-  // Step 6: Final cleanup
   return cleanSpaces
-    .replace(/\n{3,}/g, '\n\n') // Replace multiple newlines with double newlines
-    .replace(/:\s+/g, ': ') // Normalize spacing after colons
-    .replace(/\s{2,}/g, ' ') // Remove multiple spaces
-    .replace(/^\s+|\s+$/g, '') // Trim start and end
-    .replace(/\u0000/g, ''); // Remove null characters
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/:\s+/g, ': ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^\s+|\s+$/g, '')
+    .replace(/\u0000/g, '');
 }
 
 export function newBoltShellProcess(): BoltShell {
   return new BoltShell();
 }
 
-// PersistentShell class for WebContainerManager
 export class PersistentShell {
   private shell: BoltShell;
-  private initialized: boolean = false;
-  private terminalRef: any = null;
+  private initialized = false;
+  private xtermInstance: XTermTerminal | null = null; // Store XTerm instance
 
   constructor() {
     this.shell = new BoltShell();
   }
 
   isInitialized(): boolean {
-    return this.initialized;
+    return this.initialized && this.shell.isInitialized;
   }
 
-  async init(webcontainer: WebContainer, terminalRef: any): Promise<void> {
-    if (terminalRef) {
-      this.terminalRef = terminalRef;
+  // Modified init to accept XTermTerminal instance
+  async init(webcontainer: WebContainer, xtermInstance: XTermTerminal): Promise<void> {
+    console.log("PersistentShell: Init called.");
+    if (!xtermInstance) {
+      console.error('PersistentShell: XTerm instance is not available for init.');
+      throw new Error('XTerm instance is not available for init.');
     }
-    
-    if (this.initialized) return;
-    
+    this.xtermInstance = xtermInstance;
+
+    if (this.initialized) {
+      console.log("PersistentShell: Already initialized.");
+      return;
+    }
+
     try {
-      // Make sure we have a valid terminal before proceeding
-      if (!terminalRef?.current?.terminal) {
-        console.error('PersistentShell: Terminal reference is not available');
-        throw new Error('Terminal reference is not available');
-      }
-      
-      console.log('PersistentShell: Initializing with terminal', {
-        cols: terminalRef.current.terminal.cols || 80,
-        rows: terminalRef.current.terminal.rows || 24
+      console.log('PersistentShell: Initializing BoltShell with XTerm instance', {
+        cols: this.xtermInstance.cols || 80,
+        rows: this.xtermInstance.rows || 24
       });
-      
-      await this.shell.init(webcontainer, terminalRef.current.terminal);
+      await this.shell.init(webcontainer, this.xtermInstance);
       this.initialized = true;
+      console.log("PersistentShell: BoltShell initialization successful.");
     } catch (error) {
-      console.error('Failed to initialize persistent shell:', error);
+      console.error('PersistentShell: Failed to initialize persistent shell:', error);
+      this.initialized = false; // Ensure state reflects failure
       throw error;
     }
   }
 
-  async restore(terminalRef: any): Promise<void> {
-    this.terminalRef = terminalRef;
-    // No need to re-initialize if already initialized
+  // Modified restore to accept XTermTerminal instance
+  async restore(xtermInstance: XTermTerminal): Promise<void> {
+    console.log("PersistentShell: Restore called.");
+    if (!xtermInstance) {
+      console.error('PersistentShell: XTerm instance is not available for restore.');
+      return;
+    }
+    this.xtermInstance = xtermInstance;
+    if (this.initialized && this.shell.getProcess) { // Check if shell and its process exist
+      console.log("PersistentShell: Restoring BoltShell with new XTerm instance.");
+      await this.shell.restore(this.xtermInstance);
+    } else {
+      console.warn("PersistentShell: Cannot restore, shell not initialized or process missing.");
+    }
   }
 
+
   getDimensions() {
+    if (this.xtermInstance) {
+      return { cols: this.xtermInstance.cols || 80, rows: this.xtermInstance.rows || 24 };
+    }
     return { cols: 80, rows: 24 };
   }
 
-  async executeCommand(command: string, args: string[] = [], terminalId: string = 'main'): Promise<{exitCode: number}> {
+  async executeCommand(command: string, args: string[] = [], sessionId: string = 'main'): Promise<ExecutionResult> {
+    console.log('[PersistentShell] executeCommand called:', { command, args, sessionId, initialized: this.initialized });
     if (!this.initialized) {
-      console.warn('Attempting to execute command on uninitialized shell');
-      return { exitCode: 1 };
+      console.warn('PersistentShell: Attempting to execute command on uninitialized shell');
+      this.xtermInstance?.write('\r\n\x1b[31mShell not initialized. Please wait.\x1b[0m\r\n');
+      return { output: '', exitCode: 1 };
     }
-
+    console.log(`[PersistentShell] Executing command in terminal ${sessionId}: ${command}`);
     try {
-      const result = await this.shell.executeCommand(terminalId, command);
-      return { exitCode: result?.exitCode || 0 };
+      const result = await this.shell.executeCommand(command, sessionId);
+      console.log(`[PersistentShell] Command executed. Exit code: ${result?.exitCode}`);
+      return result;
     } catch (error) {
-      console.error('Error executing command:', error);
-      return { exitCode: 1 };
+      console.error('[PersistentShell] Error executing command:', error);
+      this.xtermInstance?.write(`\r\n\x1b[31mError executing command: ${error}\x1b[0m\r\n`);
+      return { output: '', exitCode: 1 };
     }
   }
 
   dispose(preserveState: boolean = true): void {
-    // Clean up resources but optionally preserve state
+    console.log(`PersistentShell: Disposing. Preserve state: ${preserveState}`);
     this.initialized = false;
     if (!preserveState) {
-      this.terminalRef = null;
+      this.xtermInstance = null;
     }
+    // Further cleanup of BoltShell if necessary
   }
 }
 
 export function createPersistentShell(): PersistentShell {
+  // Only create the shell instance if we're in a browser environment
+  if (!isBrowser) {
+    // Return a stub implementation for SSR
+    const stubShell = new PersistentShell();
+    // Override methods to do nothing if needed
+    (stubShell as any).initialized = false;
+    (stubShell as any).xtermInstance = null;
+    (stubShell as any).shell = {
+      terminal: null,
+      process: null,
+      executionState: atom(undefined),
+      init: async () => { },
+      restore: async () => { },
+      executeCommand: async () => ({ output: '', exitCode: 1 }),
+    };
+
+    return stubShell;
+  }
+
   return new PersistentShell();
 }

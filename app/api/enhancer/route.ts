@@ -1,4 +1,6 @@
+// app/api/enhancer/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { getUserApiKey } from '@/lib/api-keys';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
@@ -19,6 +21,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid or missing provider' }, { status: 400 });
     }
 
+    // Get user's API key for OpenRouter
+    const userApiKey = await getUserApiKey('OpenRouter');
+    
+    if (!userApiKey) {
+      return NextResponse.json({ 
+        error: 'OpenRouter API key not found. Please add your API key in settings.' 
+      }, { status: 401 });
+    }
+
     // Create a ReadableStream
     const stream = new ReadableStream({
       async start(controller) {
@@ -27,7 +38,7 @@ export async function POST(request: NextRequest) {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY || ''}`,
+              'Authorization': `Bearer ${userApiKey}`,
               'HTTP-Referer': request.headers.get('referer') || 'https://geminicoder.com',
               'X-Title': 'GeminiCoder',
             },
@@ -87,11 +98,11 @@ export async function POST(request: NextRequest) {
           const decoder = new TextDecoder();
           while (true) {
             const { done, value } = await reader.read();
-            
+
             if (done) {
               break;
             }
-            
+
             const chunk = decoder.decode(value, { stream: true });
             controller.enqueue(new TextEncoder().encode(chunk));
           }
@@ -113,11 +124,11 @@ export async function POST(request: NextRequest) {
     });
   } catch (error) {
     console.error('Error in enhancer API:', error);
-    
+
     if (error instanceof Error && error.message?.includes('API key')) {
       return NextResponse.json({ error: 'Invalid or missing API key' }, { status: 401 });
     }
-    
+
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

@@ -1,12 +1,11 @@
-import { convertToCoreMessages, streamText as _streamText, type Message } from 'ai';
-import { getSystemPrompt } from '../prompt';
-import { DEFAULT_MODEL } from '../constants';
-import { WORK_DIR, MODIFICATIONS_TAG_NAME, allowedHTMLElements } from '../prompt';
-import { createFilesContext, extractPropertiesFromMessage } from './serverUtils';
-import { getFilePaths } from './select-context';
-import { DEFAULT_PROVIDER } from '../provider';
-import type { Env, IProviderSetting } from '../../types/index';
+import { streamText as _streamText, convertToCoreMessages, type Message } from 'ai';
 import type { FileMap } from '../constants';
+import { DEFAULT_MODEL } from '../constants';
+import { MODIFICATIONS_TAG_NAME, WORK_DIR, allowedHTMLElements, getSystemPrompt } from '../prompt';
+import { DEFAULT_PROVIDER } from '../provider';
+import type { Env, IProviderSetting } from '../types/index';
+import { getFilePaths } from './select-context';
+import { createFilesContext, extractPropertiesFromMessage } from './serverUtils';
 
 export type Messages = Message[];
 
@@ -38,6 +37,7 @@ export async function streamText(props: {
   summary?: string;
   messageSliceId?: number;
   promptEnhancing?: boolean;
+  selectedModel?: string;
 }) {
   const {
     messages,
@@ -51,14 +51,16 @@ export async function streamText(props: {
     contextFiles,
     summary,
     promptEnhancing,
+    selectedModel,
   } = props;
-  
-  // Force use of DEFAULT_MODEL only
-  let currentModel = DEFAULT_MODEL;
+
+  let currentModel = selectedModel || DEFAULT_MODEL;
+
+  // Special case for prompt enhancing
   if (promptEnhancing) {
     currentModel = 'openai/gpt-4o-mini';
   }
-  
+
   let processedMessages = messages.map((message) => {
     if (message.role === 'user') {
       const { content } = extractPropertiesFromMessage(message);
@@ -76,13 +78,11 @@ export async function streamText(props: {
 
   const provider = DEFAULT_PROVIDER;
 
-  // Simple prompt library implementation
   const getPromptFromLibrary = (promptId: string, options: any) => {
-    // Default implementation - just return system prompt
     return getSystemPrompt(options.cwd);
   };
 
-  let systemPrompt = promptId ? 
+  let systemPrompt = promptId ?
     getPromptFromLibrary(promptId, {
       cwd: WORK_DIR,
       allowedHtmlElements: allowedHTMLElements,
@@ -139,14 +139,6 @@ ${props.summary}
   const hasMultimodalContent = originalMessages.some((msg) => Array.isArray(msg.content));
 
   try {
-    console.log('StreamText params:', {
-      modelName: currentModel,
-      hasMultimodalContent,
-      messageCount: processedMessages.length,
-      hasSummary: Boolean(summary),
-      hasContextFiles: Boolean(contextFiles),
-    });
-    
     if (hasMultimodalContent) {
       /*
        * For multimodal content, we need to preserve the original array structure
@@ -156,24 +148,24 @@ ${props.summary}
         role: msg.role === 'system' || msg.role === 'user' || msg.role === 'assistant' ? msg.role : 'user',
         content: Array.isArray(msg.content)
           ? msg.content.map((item) => {
-              // Ensure each content item has the correct format
-              if (typeof item === 'string') {
-                return { type: 'text', text: item };
+            // Ensure each content item has the correct format
+            if (typeof item === 'string') {
+              return { type: 'text', text: item };
+            }
+
+            if (item && typeof item === 'object') {
+              if (item.type === 'image' && item.image) {
+                return { type: 'image', image: item.image };
               }
 
-              if (item && typeof item === 'object') {
-                if (item.type === 'image' && item.image) {
-                  return { type: 'image', image: item.image };
-                }
-
-                if (item.type === 'text') {
-                  return { type: 'text', text: item.text || '' };
-                }
+              if (item.type === 'text') {
+                return { type: 'text', text: item.text || '' };
               }
+            }
 
-              // Default fallback for unknown formats
-              return { type: 'text', text: String(item || '') };
-            })
+            // Default fallback for unknown formats
+            return { type: 'text', text: String(item || '') };
+          })
           : [{ type: 'text', text: typeof msg.content === 'string' ? msg.content : String(msg.content || '') }],
       }));
 

@@ -1,9 +1,9 @@
 import { generateText, type CoreTool, type GenerateTextResult, type Message } from 'ai';
 import ignore from 'ignore';
-import { IGNORE_PATTERNS, SECONDARY_MODEL } from '../constants';
+import { FileMap, IGNORE_PATTERNS, SECONDARY_MODEL } from '../constants';
 import { DEFAULT_PROVIDER } from '../provider';
+import type { Env, IProviderSetting } from '../types/index';
 import { createFilesContext, extractCurrentContext, extractPropertiesFromMessage, simplifyBoltActions } from './serverUtils';
-import type { Env, IProviderSetting, FileMap } from '../../types/index';
 
 // Common patterns to ignore, similar to .gitignore
 
@@ -18,14 +18,14 @@ export async function selectContext(props: {
   promptId?: string;
   contextOptimization?: boolean;
   summary?: string;
+  selectedModel?: string;
   onFinish?: (resp: GenerateTextResult<Record<string, CoreTool<any, any>>, never>) => void;
 }) {
-  const { messages, env: serverEnv, apiKeys, files, providerSettings, summary, onFinish } = props;
-  let currentModel = SECONDARY_MODEL;
+  const { messages, env: serverEnv, apiKeys, files, providerSettings, summary, onFinish, selectedModel } = props;
+  let currentModel = selectedModel || SECONDARY_MODEL;
   const processedMessages = messages.map((message) => {
     if (message.role === 'user') {
-      const { model, content } = extractPropertiesFromMessage(message);
-      currentModel = model;
+      const { content } = extractPropertiesFromMessage(message);
       return { ...message, content };
     } else if (message.role == 'assistant') {
       let content = message.content;
@@ -51,7 +51,7 @@ export async function selectContext(props: {
       const relativePath = parts[parts.length - 1];
       return !ig.ignores(relativePath);
     }
-    
+
     // For relative paths, just use the path as is
     const relPath = x.replace('/home/project/', '');
     return !ig.ignores(relPath);
@@ -78,7 +78,7 @@ export async function selectContext(props: {
     context = createFilesContext(contextFiles);
   }
 
-  const summaryText = summary 
+  const summaryText = summary
     ? `Here is the summary of the chat till now: ${summary}`
     : 'No summary available yet. This is the beginning of the conversation.';
 
@@ -178,17 +178,17 @@ Please respond ONLY with a list of file paths without any explanation or comment
   const normalizedFileMap: FileMap = {};
   Object.keys(selectedFileMap).forEach((path) => {
     let normalizedPath = path;
-    
+
     // Remove WORK_DIR prefix if present
     if (normalizedPath.startsWith('/home/project/')) {
       normalizedPath = normalizedPath.replace('/home/project/', '');
     }
-    
+
     // Remove any leading slashes to ensure it's relative
     while (normalizedPath.startsWith('/')) {
       normalizedPath = normalizedPath.substring(1);
     }
-    
+
     // Use the normalized path as the new key
     normalizedFileMap[normalizedPath] = selectedFileMap[path];
   });

@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { FileEntry } from '@/types'; // Assuming FileEntry is in @/types
-import { ChevronRight, FileIcon, Loader2, LoaderCircle, Pencil, Save } from 'lucide-react';
-import Editor, { OnMount } from '@monaco-editor/react';
-import { Button } from '@/components/ui/button';
 import { BinaryFile } from '@/components/BinaryFile'; // Import the new component
+import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
+import { FileEntry } from '@/types'; // Assuming FileEntry is in @/types
+import Editor, { OnMount } from '@monaco-editor/react';
+import { ChevronRight, FileIcon, LoaderCircle, Pencil } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Badge } from './ui/badge';
 import { ShimmerText } from './ui/text-shimmer';
-import { cn } from '@/lib/utils';
 
 interface EditorProps {
   selectedFile: string | null;
@@ -143,7 +143,7 @@ export function CodeEditor({
         'editor.lineHighlightBackground': '#1c1c1e',
       }
     });
-    
+
     monaco.editor.setTheme('darkerTheme');
 
     // Add keyboard shortcut for saving
@@ -214,7 +214,7 @@ export function CodeEditor({
             if (!isUnreadable) {
               setFileContent(newContent);
               setUnsavedContent(newContent); // Keep unsaved in sync during streaming
-              
+
               // Auto-scroll to the bottom of the editor after content update
               if (editorRef.current) {
                 setTimeout(() => {
@@ -258,7 +258,7 @@ export function CodeEditor({
       setHasUnsavedChanges(false);
       setError(null);
       setIsBinaryOrUnreadable(false); // Reset binary flag
-      
+
       // Clear error if streaming (since file might not exist yet)
       if (isStreaming) {
         errorSuppressedRef.current = true;
@@ -300,7 +300,7 @@ export function CodeEditor({
             console.error(`Error reading file from WebContainer: ${selectedFile}`, err);
             // Check if error indicates it's a directory
             if (err instanceof Error && err.message.includes('EISDIR')) {
-               throw new Error('Selected item is a directory, not a file.');
+              throw new Error('Selected item is a directory, not a file.');
             }
             // Assume other errors might mean it's unreadable/binary
             setIsBinaryOrUnreadable(true);
@@ -335,7 +335,7 @@ export function CodeEditor({
 
       } catch (err) {
         console.error('Failed to load file:', err);
-        
+
         // Only show errors if not streaming or suppressing errors
         if (!isStreaming && !errorSuppressedRef.current) {
           const errorMessage = err instanceof Error ? err.message : String(err);
@@ -349,7 +349,7 @@ export function CodeEditor({
         }
       } finally {
         setIsLoading(false);
-        
+
         // Turn off error suppression after a delay
         if (errorSuppressedRef.current) {
           setTimeout(() => {
@@ -362,7 +362,6 @@ export function CodeEditor({
     loadContent();
   }, [selectedFile, files, loadFileContent, isLoading, isStreaming, isBinaryOrUnreadable]);
 
-  // --- Render Logic ---
 
   if (!selectedFile) {
     return (
@@ -426,7 +425,7 @@ export function CodeEditor({
           )}
         >
           <div className="flex items-center gap-1.5">
-            <div 
+            <div
               className={cn(
                 "absolute left-2.5 transition-all duration-200 ease-in-out opacity-0 -translate-x-2",
                 isSaving && "opacity-100 translate-x-0"

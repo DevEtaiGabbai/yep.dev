@@ -1,4 +1,4 @@
-import { WebContainer } from '@webcontainer/api';
+import type { LanguageModelV1 } from "ai";
 
 export interface Env {
   [key: string]: any;
@@ -8,6 +8,7 @@ export interface IProviderSetting {
   apiToken?: string;
   baseUrl?: string;
   organization?: string;
+  enabled?: boolean;
 }
 
 export interface FileEntry {
@@ -93,10 +94,54 @@ export interface EditorRateLimit {
 }
 
 // No need to extend Window interface here as it's already defined in types.d.ts
+export type ProgressType = 'summary' | 'context' | 'response';
+export type ProgressStatus = 'in-progress' | 'complete';
 
-// Add this to the global window object
-declare global {
-  interface Window {
-    webContainerInstance: WebContainer;
-  }
+export interface ProgressIndicator {
+  label: ProgressType;
+  status: ProgressStatus;
+  message: string;
+  order: number;
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string | Array<{
+    type: 'text' | 'image_url';
+    text?: string;
+    image_url?: {
+      url: string;
+    };
+  }>;
+}
+
+export interface ModelInfo {
+  name: string;
+  label: string;
+  provider: string;
+  maxTokenAllowed: number;
+}
+
+export interface ProviderInfo {
+  name: string;
+  staticModels: ModelInfo[];
+  getDynamicModels?: (
+    apiKeys?: Record<string, string>,
+    settings?: IProviderSetting,
+    serverEnv?: Record<string, string>
+  ) => Promise<ModelInfo[]>;
+  getModelInstance: (options: {
+    model: string;
+    serverEnv: Env;
+    apiKeys?: Record<string, string>;
+    providerSettings?: Record<string, IProviderSetting>;
+  }) => LanguageModelV1;
+  getApiKeyLink?: string;
+  labelForGetApiKey?: string;
+  icon?: string;
+}
+export interface ProviderConfig {
+  baseUrlKey?: string;
+  baseUrl?: string;
+  apiTokenKey?: string;
 }

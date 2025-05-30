@@ -1,22 +1,31 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
-import { motion } from 'framer-motion';
-import { MessageSquare, Brain, BookDashed, WrapText } from 'lucide-react';
 import { Markdown } from '@/components/Markdown';
+import { ProgressIndicator } from '@/lib/types/index';
+import { motion } from 'framer-motion';
+import { BookDashed, Brain, MessageSquare, WrapText } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 
-export type ProgressType = 'summary' | 'context' | 'response';
-export type ProgressStatus = 'in-progress' | 'complete';
-
-interface ProgressIndicator {
-  label: ProgressType;
-  status: ProgressStatus;
-  message: string;
-  order: number;
-}
+// Helper function to extract text content from mixed content types
+const getTextContent = (content: string | Array<{type: 'text' | 'image_url'; text?: string; image_url?: {url: string}}>): string => {
+  if (typeof content === 'string') {
+    return content;
+  }
+  // For array content, extract text from text blocks
+  return content
+    .filter(item => item.type === 'text' && item.text)
+    .map(item => item.text)
+    .join(' ');
+};
 
 interface AssistantMessageProps {
-  content: string;
+  content: string | Array<{
+    type: 'text' | 'image_url';
+    text?: string;
+    image_url?: {
+      url: string;
+    };
+  }>;
   isStreaming?: boolean;
   activeFile?: string | null;
   completedFiles?: Set<string>;
@@ -25,82 +34,71 @@ interface AssistantMessageProps {
   progress?: ProgressIndicator[];
 }
 
-// Helper function to process content with bolt artifacts
+// Helper function to process content with bolt artifacts and actions
 const processContent = (content: string): { beforeBolt: string; afterBolt: string } => {
-  // Default result
   const result = { beforeBolt: '', afterBolt: '' };
-  
-  // If there are no bolt artifacts, return the whole content as beforeBolt
-  if (!content.includes('<boltArtifact')) {
-    result.beforeBolt = content;
-    return result;
-  }
-  
-  // Find the first opening boltArtifact tag
-  const startIndex = content.indexOf('<boltArtifact');
-  if (startIndex !== -1) {
-    // Everything before the first <boltArtifact> goes in beforeBolt
-    result.beforeBolt = content.substring(0, startIndex).trim();
-    
-    // Find the last closing boltArtifact tag
-    const endTagPattern = '</boltArtifact>';
-    const endIndex = content.lastIndexOf(endTagPattern);
-    
-    if (endIndex !== -1) {
-      // Everything after the last </boltArtifact> goes in afterBolt
-      const afterEndIndex = endIndex + endTagPattern.length;
-      result.afterBolt = content.substring(afterEndIndex).trim();
-    }
-  }
-  
+
+  // The content received here should already be clean of SSE prefixes.
+  // The main task is to separate narrative from Bolt tags.
+
+  let cleanContent = content.trim(); // Start with a trim.
+
+  // IMPORTANT FIX: Instead of splitting content and removing bolt tags,
+  // we'll preserve all content to ensure code examples remain visible
+  // This addresses the issue where code disappears after streaming
+
+  // Just set beforeBolt to the entire content to preserve everything
+  result.beforeBolt = cleanContent;
+  result.afterBolt = '';
+
   return result;
 };
 
 const AiStreamState = ({ isStreaming, progress }: { isStreaming: boolean; progress?: ProgressIndicator[] }) => {
   const [isTransitioning, setIsTransitioning] = useState(false);
-  
+
   // Determine current state based on progress data
   const currentState = useMemo(() => {
     if (!progress || progress.length === 0) return 'summary';
-    
+
     // Find the most recent in-progress item
     const inProgressItem = progress
       .filter(item => item.status === 'in-progress')
       .sort((a, b) => b.order - a.order)[0];
-    
+
     if (inProgressItem) {
       return inProgressItem.label;
     }
-    
+
     // If no in-progress items, find the most recent completed item
     const lastCompleted = progress
       .filter(item => item.status === 'complete')
       .sort((a, b) => b.order - a.order)[0];
-    
+
     if (lastCompleted) {
       if (lastCompleted.label === 'summary') return 'context';
       if (lastCompleted.label === 'context') return 'response';
       return 'thinking';
     }
-    
+
     return 'summary';
   }, [progress]);
-  
+
   // Handle transitions
   useEffect(() => {
     if (!isStreaming) return;
-    
+
     setIsTransitioning(true);
     const transitionTimeout = setTimeout(() => {
       setIsTransitioning(false);
     }, 300);
-    
+
     return () => clearTimeout(transitionTimeout);
   }, [isStreaming, currentState]);
-  
+
   let icon;
   let displayText;
-  
+
   switch (currentState) {
     case 'summary':
       icon = <WrapText className="w-4 h-4 text-[#969798]" />;
@@ -115,12 +113,12 @@ const AiStreamState = ({ isStreaming, progress }: { isStreaming: boolean; progre
       icon = <Brain className="w-4 h-4 text-[#969798]" />;
       displayText = 'Reasoning';
   }
-  
+
   // Calculate text length-based dynamic spread (similar to text-shimmer component)
   const spread = displayText.length * 2;
-  
+
   return (
-    <motion.div 
+    <motion.div
       className={`flex items-center gap-2 mb-3 ${isTransitioning ? 'blur-sm' : 'blur-0'}`}
       animate={{ filter: isTransitioning ? 'blur(4px)' : 'blur(0px)' }}
       transition={{ duration: 0.3, ease: 'easeInOut' }}
@@ -133,7 +131,7 @@ const AiStreamState = ({ isStreaming, progress }: { isStreaming: boolean; progre
         initial={{ backgroundPosition: '100% center' }}
         animate={{ backgroundPosition: '0% center' }}
         transition={{
-          repeat: Infinity, 
+          repeat: Infinity,
           duration: 2,
           ease: 'linear',
           repeatType: 'loop'
@@ -150,7 +148,7 @@ const AiStreamState = ({ isStreaming, progress }: { isStreaming: boolean; progre
   );
 };
 
-export const AssistantMessage = ({ 
+export const AssistantMessage = ({
   content,
   isStreaming,
   activeFile,
@@ -159,51 +157,66 @@ export const AssistantMessage = ({
   completedCommands,
   progress = []
 }: AssistantMessageProps) => {
-  const [displayContent, setDisplayContent] = useState<React.ReactNode>(null);
-  
-  useEffect(() => {
-    if (content) {
-      // Extract content before and after bolt artifacts
-      const { beforeBolt, afterBolt } = processContent(content);
-      
-      // Build the display content
-      setDisplayContent(
-        <div className="flex flex-col w-full gap-2">
-          {/* Text before the bolt artifact */}
-          {beforeBolt && (
-            <Markdown 
-              content={beforeBolt} 
-              isStreaming={isStreaming}
-            />
-          )}
-          
-          {/* File and command updates - only show if we have any status to display */}
-          {(activeFile || (completedFiles && completedFiles.size > 0) || 
-            activeCommand || (completedCommands && completedCommands.size > 0)) && (
-            <Markdown 
+  // Use useMemo instead of useState + useEffect to prevent infinite loops
+  const displayContent = useMemo(() => {
+    if (!content) return null;
+
+    // Extract text content for processing
+    const textContent = getTextContent(content);
+
+    // Clean the content of any SSE markers or raw token artifacts
+    // Store original clean content for reference during streaming
+    const rawContent = textContent
+      // First remove SSE specifics that might appear in the completed message
+      .replace(/^\d+:\[[^\]]+\]$/gm, '')
+      .replace(/^f:{[^}]+}$/gm, '')
+      .replace(/^e:{[^}]+}$/gm, '')
+      .replace(/^d:{[^}]+}$/gm, '')
+      .replace(/^8:\[[^\]]+\]$/gm, '')
+      .trim();
+
+    // Extract content before and after bolt artifacts
+    const { beforeBolt, afterBolt } = processContent(rawContent);
+
+    // Return the display content
+    return (
+      <div className="flex flex-col w-full gap-2">
+        {/* Text before the bolt artifact */}
+        {beforeBolt && (
+          <Markdown
+            content={beforeBolt}
+            isStreaming={isStreaming}
+          />
+        )}
+
+        {/* File and command updates - only show if we have any status to display
+           Note: we pass isStreaming but the presence of completed files/commands should
+           not depend on streaming status */}
+        {(activeFile || (completedFiles && completedFiles.size > 0) ||
+          activeCommand || (completedCommands && completedCommands.size > 0)) && (
+            <Markdown
               content=""
               activeFile={activeFile}
               completedFiles={completedFiles}
               activeCommand={activeCommand}
               completedCommands={completedCommands}
-              isStreaming={isStreaming} 
-            />
-          )}
-          
-          {/* Text after the bolt artifact */}
-          {afterBolt && (
-            <Markdown 
-              content={afterBolt} 
               isStreaming={isStreaming}
             />
           )}
-        </div>
-      );
-    }
-  }, [content, isStreaming, activeFile, completedFiles, activeCommand, completedCommands, progress]);
+
+        {/* Text after the bolt artifact */}
+        {afterBolt && (
+          <Markdown
+            content={afterBolt}
+            isStreaming={isStreaming}
+          />
+        )}
+      </div>
+    );
+  }, [content, activeFile, completedFiles, activeCommand, completedCommands, isStreaming]);
 
   return (
-    <motion.div 
+    <motion.div
       className="flex flex-col w-full mb-4"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
@@ -218,10 +231,10 @@ export const AssistantMessage = ({
           {isStreaming && !content && (
             <AiStreamState isStreaming={isStreaming} progress={progress} />
           )}
-          
+
           {displayContent}
         </div>
       </div>
     </motion.div>
   );
-}; 
+};

@@ -1,6 +1,6 @@
-import type { IProviderSetting, ModelInfo, Env } from '@/types/index';
-import type { LanguageModelV1 } from 'ai';
+import type { Env, IProviderSetting, ModelInfo } from '@/lib/types/index';
 import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import type { LanguageModelV1 } from 'ai';
 
 interface OpenRouterModel {
   name: string;

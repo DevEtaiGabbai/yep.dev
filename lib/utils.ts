@@ -1,10 +1,12 @@
-import { decode as base64Decode } from 'js-base64';
-import { type ClassValue, clsx } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-import { GITHUB_API_BASE_URL } from './constants';
-import he from 'he';
-import { FileEntry } from '../types';
+
+
 import { ITheme } from '@xterm/xterm';
+import { type ClassValue, clsx } from 'clsx';
+import he from 'he';
+import { decode as base64Decode } from 'js-base64';
+import { twMerge } from 'tailwind-merge';
+import { FileEntry } from '../types';
+import { GITHUB_API_BASE_URL } from './constants';
 
 // Define types locally since they aren't exported from types file
 export interface GitHubFile {
@@ -37,25 +39,25 @@ export const extractRepoName = (url: string): string | null => {
   // 2. https://github.com/username/repo.git
   // 3. git@github.com:username/repo.git
   // 4. username/repo (already in correct format)
-  
+
   try {
     // If it's already in the format 'username/repo' or 'username/repo.git'
     if (/^[^\/]+\/[^\/]+$/.test(url) || /^[^\/]+\/[^\/]+\.git$/.test(url)) {
       return url.replace(/\.git$/, '');
     }
-    
+
     // Standard https GitHub URL
     const httpsMatch = url.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?(?:\/)?$/);
     if (httpsMatch && httpsMatch[1]) {
       return httpsMatch[1];
     }
-    
+
     // SSH GitHub URL
     const sshMatch = url.match(/git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/);
     if (sshMatch && sshMatch[1]) {
       return sshMatch[1];
     }
-    
+
     console.error(`Failed to extract repo name from URL: ${url}`);
     return null;
   } catch (error) {
@@ -85,11 +87,11 @@ export const getGitHubRepoContent = async (
       const remaining = response.headers.get('x-ratelimit-remaining');
       const limit = response.headers.get('x-ratelimit-limit');
       const reset = response.headers.get('x-ratelimit-reset');
-      
+
       if (remaining && limit) {
         const resetTime = reset ? new Date(parseInt(reset) * 1000).toLocaleTimeString() : 'unknown';
         // console.log(`GitHub API Rate Limit: ${remaining}/${limit} remaining. Resets at ${resetTime}`);
-        
+
         // Warn if getting low on requests
         if (parseInt(remaining) < 10) {
           console.warn(`⚠️ GitHub API rate limit getting low: ${remaining}/${limit} remaining`);
@@ -131,7 +133,7 @@ export const getGitHubRepoContent = async (
           // Fallback to blob API if content is not included
           const blobResponse = await fetch(data.git_url, { headers });
           logRateLimits(blobResponse);
-          
+
           if (blobResponse.ok) {
             const blobData = await blobResponse.json();
             if (blobData.content) {
@@ -146,7 +148,7 @@ export const getGitHubRepoContent = async (
 
     // Process directories and files, but introduce a delay to avoid rate limiting
     const contents: GitHubFile[] = [];
-    
+
     // Process items with a small delay between each to prevent rate limiting
     for (const item of data) {
       if (item.type === 'dir') {
@@ -157,16 +159,16 @@ export const getGitHubRepoContent = async (
       } else if (item.type === 'file') {
         // For files, use the contents API directly instead of download_url
         let fileContent = '';
-        
+
         // Small files (<1MB) will have content field directly
         if (item.size < 1000000 && item.url) {
           // Add delay for each file request
           await new Promise(resolve => setTimeout(resolve, 50));
-          
+
           try {
             const fileResponse = await fetch(item.url, { headers });
             logRateLimits(fileResponse);
-            
+
             if (fileResponse.ok) {
               const fileData = await fileResponse.json();
               if (fileData.content) {
@@ -180,7 +182,7 @@ export const getGitHubRepoContent = async (
           // For larger files, note that they're too large
           fileContent = `// File too large to fetch automatically (${Math.round(item.size/1024)}KB)\n// Edit this file to load its content.`;
         }
-        
+
         contents.push({ name: item.name, path: item.path, content: fileContent });
       }
     }
@@ -235,10 +237,10 @@ export const createMountableFileSystem = (
   filesInput: GitHubFile[] | Record<string, FileEntry> | Record<string, { name: string; content: string; type: string }>
 ): Record<string, any> => {
   console.log("Creating mountable file system for WebContainer...");
-  
+
   // Convert input to a consistent array format
   let processedFiles: Array<{ path: string; content: string }> = [];
-  
+
   if (Array.isArray(filesInput)) {
     processedFiles = filesInput.map(file => ({
       path: file.path,
@@ -254,31 +256,31 @@ export const createMountableFileSystem = (
     }));
     console.log(`Processing ${processedFiles.length} files from state`);
   }
-  
+
   // Build WebContainer-compatible file system structure
   const fileSystem: Record<string, any> = {};
-  
+
   // Debug tracking
   const pathsIncluded = new Set<string>();
-  
+
   for (const file of processedFiles) {
     const pathParts = file.path.split('/');
     let currentLevel = fileSystem;
-    
+
     // Track the full path of each directory we're creating
     let currentPath = '';
-    
+
     // Navigate through directories
     for (let i = 0; i < pathParts.length - 1; i++) {
       const dirName = pathParts[i];
-      
+
       // Skip empty directory names
       if (!dirName) continue;
-      
+
       // Update current path
       currentPath = currentPath ? `${currentPath}/${dirName}` : dirName;
       pathsIncluded.add(currentPath);
-      
+
       // Create directory if it doesn't exist
       if (!currentLevel[dirName]) {
         currentLevel[dirName] = { directory: {} };
@@ -286,11 +288,11 @@ export const createMountableFileSystem = (
         // Force directory if something else with the same name exists
         currentLevel[dirName] = { directory: {} };
       }
-      
+
       // Move to the next level
       currentLevel = currentLevel[dirName].directory;
     }
-    
+
     // Add the file at the current level
     const fileName = pathParts[pathParts.length - 1];
     if (fileName) {
@@ -298,16 +300,16 @@ export const createMountableFileSystem = (
       pathsIncluded.add(file.path);
     }
   }
-  
+
   console.log(`Completed file system generation. Included ${pathsIncluded.size} paths.`);
-  
+
   // Debug info for components/ui path specifically
   if (pathsIncluded.has('components/ui')) {
     console.log('components/ui folder was successfully included');
   } else {
     console.log('Warning: components/ui folder was NOT included');
   }
-  
+
   return fileSystem;
 };
 
@@ -324,18 +326,18 @@ export const getLanguageForFilename = (filename: string): string => {
 
 export function extractFilesFromContent(content: string): GeneratedFile[] {
   const files: GeneratedFile[] = [];
-  
+
   // First extract the boltArtifact blocks
   const artifactRegex = /<boltArtifact[^>]*>([\s\S]*?)<\/boltArtifact>/g;
   let artifactMatch;
-  
+
   while ((artifactMatch = artifactRegex.exec(content)) !== null) {
     const artifactContent = artifactMatch[1];
-    
+
     // Then extract file actions from each artifact
     const fileRegex = /<boltAction\s+type="file"\s+filePath="([^"]+)">([\s\S]*?)(?=<\/boltAction>)/g;
     let fileMatch;
-    
+
     while ((fileMatch = fileRegex.exec(artifactContent)) !== null) {
       const [_, path, fileContent] = fileMatch;
       if (path && fileContent) {
@@ -346,13 +348,13 @@ export function extractFilesFromContent(content: string): GeneratedFile[] {
       }
     }
   }
-  
+
   // If no boltArtifact was found, try to extract boltAction directly
   // This is for backward compatibility
   if (files.length === 0) {
     const fileRegex = /<boltAction\s+type="file"\s+filePath="([^"]+)">([\s\S]*?)(?=<\/boltAction>|$)/g;
     let match;
-    
+
     while ((match = fileRegex.exec(content)) !== null) {
       const [_, path, fileContent] = match;
       if (path && fileContent) {
@@ -363,7 +365,7 @@ export function extractFilesFromContent(content: string): GeneratedFile[] {
       }
     }
   }
-  
+
   return files;
 }
 

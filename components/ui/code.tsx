@@ -1,46 +1,23 @@
 "use client"
 
-import * as shiki from "shiki"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 import { useState, useEffect, useCallback } from "react"
 import { useTheme } from "next-themes"
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark, oneLight } from 'react-syntax-highlighter/dist/cjs/styles/prism';
 
-// Create a highlighter instance that can be reused
-let highlighterPromise: Promise<shiki.Highlighter> | null = null
-
-const getHighlighter = async () => {
-  if (!highlighterPromise) {
-    highlighterPromise = shiki.createHighlighter({
-      themes: ["github-dark", "github-light"],
-      langs: [
-        "json",
-        "typescript",
-        "javascript",
-        "tsx",
-        "jsx",
-        "html",
-        "css",
-        "bash",
-        "markdown",
-        "plaintext",
-      ],
-    })
-  }
-  return highlighterPromise
-}
-
-// Add custom styles for shiki container
-const customShikiStyles = `
-.code-wrapper .shiki,
-.code-wrapper .shiki pre {
+// Custom styles for code blocks
+const customCodeStyles = `
+.code-wrapper .code-block,
+.code-wrapper .code-block pre {
   background-color: transparent !important;
   margin: 0 !important;
   padding: 0 !important;
   font-family: inherit !important;
 }
-.code-wrapper .shiki code {
+.code-wrapper .code-block code {
   display: inline-block;
   min-width: 100%;
 }
@@ -91,33 +68,8 @@ const Code = ({
   ...props
 }: CodeProps) => {
   const [isCopied, setIsCopied] = useState(false)
-  const [highlightedCode, setHighlightedCode] = useState("")
   const { resolvedTheme } = useTheme()
-
-  const highlight = useCallback(async () => {
-    try {
-      const highlighter = await getHighlighter()
-      const supportedLanguages = await highlighter.getLoadedLanguages()
-      const langToUse = supportedLanguages.includes(
-        language as shiki.BundledLanguage,
-      )
-        ? language
-        : "plaintext"
-
-      const html = await highlighter.codeToHtml(code, {
-        lang: langToUse as shiki.BundledLanguage,
-        theme: resolvedTheme === "dark" ? "github-dark" : "github-light",
-      })
-      setHighlightedCode(html)
-    } catch (error) {
-      console.error("Failed to highlight code:", error)
-      setHighlightedCode(`<pre><code>${code}</code></pre>`)
-    }
-  }, [code, language, resolvedTheme])
-
-  useEffect(() => {
-    highlight()
-  }, [highlight])
+  const isDark = resolvedTheme === "dark";
 
   const handleCopyClick = async () => {
     if (isCopied) return
@@ -135,7 +87,7 @@ const Code = ({
 
   return (
     <>
-      <style>{customShikiStyles}</style>
+      <style>{customCodeStyles}</style>
       <div
         onClick={handleCopyClick}
         role="button"
@@ -156,10 +108,25 @@ const Code = ({
         }}
         {...props}
       >
-        <div
-          className="shiki-wrapper"
-          dangerouslySetInnerHTML={{ __html: highlightedCode }}
-        />
+        <div className="code-block">
+          <SyntaxHighlighter
+            language={language || 'typescript'}
+            style={isDark ? oneDark : oneLight}
+            customStyle={{
+              backgroundColor: 'transparent',
+              padding: 0,
+              margin: 0,
+              borderRadius: 0,
+            }}
+            codeTagProps={{
+              style: {
+                fontFamily: 'inherit',
+              },
+            }}
+          >
+            {code}
+          </SyntaxHighlighter>
+        </div>
       </div>
     </>
   )

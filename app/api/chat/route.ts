@@ -1,17 +1,26 @@
-import { createDataStream, generateId } from 'ai';
-import { CONTINUE_PROMPT } from '@/lib/prompt';
+import { MAX_TOKENS_NO_SUMMARY } from '@/lib/constants';
+import { CONTINUE_PROMPT, WORK_DIR } from '@/lib/prompt';
+import { createSummary } from '@/lib/server/create-summary';
+import { getFilePaths, selectContext } from '@/lib/server/select-context';
+import { extractPropertiesFromMessage } from '@/lib/server/serverUtils';
 import { streamText, type Messages, type StreamingOptions } from '@/lib/server/stream-text';
 import SwitchableStream from '@/lib/server/switchable-stream';
-import type { IProviderSetting, FileMap } from '@/types/index';
-import { getFilePaths, selectContext } from '@/lib/server/select-context';
-import type { ContextAnnotation, ProgressAnnotation } from '@/types/index';
-import { WORK_DIR } from '@/lib/prompt';
-import { createSummary } from '@/lib/server/create-summary';
-import { extractPropertiesFromMessage } from '@/lib/server/serverUtils';
-import { MAX_TOKENS_NO_SUMMARY } from '@/lib/constants';
+import { addMessage, getConversation } from '@/lib/services/conversationService';
 import { countMessageTokens } from '@/lib/tokenizer';
+import type { ContextAnnotation, FileMap, IProviderSetting, ProgressAnnotation } from '@/lib/types/index';
+import { createDataStream, generateId } from 'ai';
 
-
+// Helper function to extract text content from mixed content types
+const getTextContent = (content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>): string => {
+  if (typeof content === 'string') {
+    return content;
+  }
+  // For array content, extract text from text blocks
+  return content
+    .filter(item => item.type === 'text' && item.text)
+    .map(item => item.text)
+    .join(' ');
+};
 
 const MAX_RESPONSE_SEGMENTS = 10;
 const MAX_TOKENS = 65536;
@@ -35,51 +44,145 @@ function parseCookies(cookieHeader: string): Record<string, string> {
 }
 
 export async function POST(request: Request) {
-  const { messages, files, promptId, contextOptimization } = await request.json() as {
-    messages: Messages;
-    files: any;
-    promptId?: string;
-    contextOptimization: boolean;
-  };
-
-  const cookieHeader = request.headers.get('Cookie');
-  const apiKeys = JSON.parse(parseCookies(cookieHeader || '').apiKeys || '{}');
-  const providerSettings: Record<string, IProviderSetting> = JSON.parse(
-    parseCookies(cookieHeader || '').providers || '{}',
-  );
-
-  const stream = new SwitchableStream();
-
-  const cumulativeUsage = {
-    completionTokens: 0,
-    promptTokens: 0,
-    totalTokens: 0,
-  };
-  const encoder: TextEncoder = new TextEncoder();
-  let progressCounter: number = 1;
-
   try {
-    // Extract model from the last user message to determine tokenizer
+    const requestData = await request.json();
+    const { messages, files, promptId, contextOptimization, conversationId, selectedModel } = requestData as {
+      messages: Messages;
+      files: any;
+      promptId?: string;
+      contextOptimization: boolean;
+      conversationId?: string;
+      selectedModel?: string;
+    };
+
+    if (messages.length === 0) {
+      console.error("API Chat Route: No messages provided in request");
+      throw new Error("No messages provided");
+    }
+
+    if (!conversationId) {
+      console.warn("API Chat Route: No conversationId provided - responses won't be saved to database");
+    }
+
+    // Check if this is a refresh and conversation already has messages
+    if (conversationId) {
+      try {
+        const existingConversation = await getConversation(conversationId);
+
+        // If conversation exists and already has at least 2 messages (user + assistant response)
+        if (existingConversation && existingConversation.messages.length >= 2) {
+          const existingUserMessages = existingConversation.messages.filter(m => m.role === 'user');
+          const lastUserMessage = messages.filter(m => m.role === 'user').slice(-1)[0];
+
+          // Check if the new message already exists in the conversation
+          if (lastUserMessage && existingUserMessages.some(m => m.content === lastUserMessage.content)) {
+            // Return the existing messages from the database instead of generating a new response
+            const dataStream = createDataStream({
+              async execute(dataStream) {
+                dataStream.writeData({
+                  type: 'progress',
+                  label: 'response',
+                  status: 'complete',
+                  order: 1,
+                  message: 'Using existing response',
+                } satisfies ProgressAnnotation);
+
+                // Get the last assistant message in the conversation
+                const lastAssistantMessage = existingConversation.messages
+                  .filter(m => m.role === 'assistant')
+                  .pop();
+
+                if (lastAssistantMessage) {
+                  dataStream.write(`0:${lastAssistantMessage.content}\n`);
+                } else {
+                  dataStream.write(`0:No previous response found.\n`);
+                }
+              }
+            });
+
+            return new Response(dataStream, {
+              status: 200,
+              headers: {
+                'Content-Type': 'text/event-stream; charset=utf-8',
+                Connection: 'keep-alive',
+                'Cache-Control': 'no-cache',
+                'Text-Encoding': 'chunked',
+              },
+            });
+          }
+        }
+      } catch (error) {
+        console.error("API Chat Route: Error checking existing conversation:", error);
+        // Continue with normal processing if there's an error checking the conversation
+      }
+    }
+
+    // For debugging initial messages - log message content for first and last message in more detail
+    if (messages.length >= 1) {
+      // for (let i = 0; i < Math.min(messages.length, 3); i++) {
+      //   console.log(`API Chat Route: Message ${i + 1} - role: ${messages[i].role}, content: "${getTextContent(messages[i].content).substring(0, 200)}${getTextContent(messages[i].content).length > 200 ? '...' : ''}"`);
+      // }
+
+      // Always log the last message if there are more than 3
+      if (messages.length > 3) {
+        const lastIdx = messages.length - 1;
+      }
+    }
+
+    const cookieHeader = request.headers.get('Cookie');
+    const apiKeys = JSON.parse(parseCookies(cookieHeader || '').apiKeys || '{}');
+
+    const providerSettings: Record<string, IProviderSetting> = JSON.parse(
+      parseCookies(cookieHeader || '').providers || '{}',
+    );
+
+    const stream = new SwitchableStream();
+
+    const cumulativeUsage = {
+      completionTokens: 0,
+      promptTokens: 0,
+      totalTokens: 0,
+    };
+    const encoder: TextEncoder = new TextEncoder();
+    let progressCounter: number = 1;
+
     const lastUserMessage = messages.filter(m => m.role === 'user').slice(-1)[0];
-    const { model } = extractPropertiesFromMessage(lastUserMessage);
-    
+    const modelForTokenizer = selectedModel || extractPropertiesFromMessage(lastUserMessage).model;
+
     // Determine model family for token counting
-    const modelFamily = model?.toLowerCase().includes('gemini') 
-      ? 'gemini' 
-      : model?.toLowerCase().includes('claude') 
-        ? 'claude' 
-        : model?.toLowerCase().includes('gpt') 
-          ? 'gpt' 
+    const modelFamily = modelForTokenizer?.toLowerCase().includes('gemini')
+      ? 'gemini'
+      : modelForTokenizer?.toLowerCase().includes('claude')
+        ? 'claude'
+        : modelForTokenizer?.toLowerCase().includes('gpt')
+          ? 'gpt'
           : 'default';
-    
+
     // Count tokens accurately using the appropriate tokenizer
     const totalTokenCount = countMessageTokens(messages, modelFamily as any);
-    console.log(`Total message tokens: ${totalTokenCount} (using ${modelFamily} tokenizer)`);
 
     let lastChunk: string | undefined = undefined;
 
     const dataStream = createDataStream({
       async execute(dataStream) {
+        // Save user message to conversation if conversationId is provided
+        if (conversationId && lastUserMessage) {
+          try {
+            // Convert content to string for database storage
+            const contentForDB = typeof lastUserMessage.content === 'string'
+              ? lastUserMessage.content
+              : JSON.stringify(lastUserMessage.content);
+
+            await addMessage(conversationId, {
+              role: 'user',
+              content: contentForDB
+            });
+          } catch (error) {
+            console.error('Failed to save user message:', error);
+            // Continue processing even if user message save fails
+          }
+        }
+
         const filePaths = getFilePaths(files || {});
         let filteredFiles: FileMap | undefined = undefined;
         let summary: string | undefined = undefined;
@@ -92,9 +195,8 @@ export async function POST(request: Request) {
         if (filePaths.length > 0 && contextOptimization) {
           // Skip summary creation if message is below token threshold
           const shouldCreateSummary = totalTokenCount > MAX_TOKENS_NO_SUMMARY;
-          
+
           if (shouldCreateSummary) {
-            console.log('Generating Chat Summary');
             dataStream.writeData({
               type: 'progress',
               label: 'summary',
@@ -104,8 +206,6 @@ export async function POST(request: Request) {
             } satisfies ProgressAnnotation);
 
             // Create a summary of the chat
-            console.log(`Messages count: ${messages.length}`);
-
             summary = await createSummary({
               messages: [...messages],
               env: process.env,
@@ -115,7 +215,6 @@ export async function POST(request: Request) {
               contextOptimization,
               onFinish(resp) {
                 if (resp.usage) {
-                  console.log('createSummary token usage', JSON.stringify(resp.usage));
                   cumulativeUsage.completionTokens += resp.usage.completionTokens || 0;
                   cumulativeUsage.promptTokens += resp.usage.promptTokens || 0;
                   cumulativeUsage.totalTokens += resp.usage.totalTokens || 0;
@@ -136,11 +235,9 @@ export async function POST(request: Request) {
               chatId: messages.slice(-1)?.[0]?.id,
             } as ContextAnnotation);
           } else {
-            console.log('Skipping summary creation - message under token threshold');
           }
 
           // Update context buffer
-          console.log('Updating Context Buffer');
           dataStream.writeData({
             type: 'progress',
             label: 'context',
@@ -150,7 +247,6 @@ export async function POST(request: Request) {
           } satisfies ProgressAnnotation);
 
           // Select context files
-          console.log(`Messages count: ${messages.length}`);
           filteredFiles = await selectContext({
             messages: [...messages],
             env: process.env,
@@ -160,9 +256,9 @@ export async function POST(request: Request) {
             promptId,
             contextOptimization,
             summary,
+            selectedModel,
             onFinish(resp) {
               if (resp.usage) {
-                console.log('selectContext token usage', JSON.stringify(resp.usage));
                 cumulativeUsage.completionTokens += resp.usage.completionTokens || 0;
                 cumulativeUsage.promptTokens += resp.usage.promptTokens || 0;
                 cumulativeUsage.totalTokens += resp.usage.totalTokens || 0;
@@ -171,7 +267,9 @@ export async function POST(request: Request) {
           });
 
           if (filteredFiles) {
-            console.log(`files in context : ${JSON.stringify(Object.keys(filteredFiles))}`);
+            // console.log(`files in context : ${JSON.stringify(Object.keys(filteredFiles))}`);
+          } else {
+            // console.log("No filtered files returned from selectContext");
           }
 
           // Process paths to ensure they're all relative
@@ -188,7 +286,6 @@ export async function POST(request: Request) {
               path = path.substring(1);
             }
 
-            console.log(`Processed path: ${key} -> ${path}`);
             return path;
           });
 
@@ -211,8 +308,6 @@ export async function POST(request: Request) {
         const options: StreamingOptions = {
           toolChoice: 'none',
           onFinish: async ({ text: content, finishReason, usage }) => {
-            console.log('usage', JSON.stringify(usage));
-
             if (usage) {
               cumulativeUsage.completionTokens += usage.completionTokens || 0;
               cumulativeUsage.promptTokens += usage.promptTokens || 0;
@@ -220,6 +315,19 @@ export async function POST(request: Request) {
             }
 
             if (finishReason !== 'length') {
+              // Save assistant message to conversation if conversationId is provided
+              if (conversationId) {
+                try {
+                  // Call addMessage function directly instead of using fetch API
+                  await addMessage(conversationId, {
+                    role: 'assistant',
+                    content
+                  });
+                } catch (error) {
+                  console.error('Failed to save assistant message:', error);
+                }
+              }
+
               dataStream.writeMessageAnnotation({
                 type: 'usage',
                 value: {
@@ -247,15 +355,15 @@ export async function POST(request: Request) {
 
             const switchesLeft = MAX_RESPONSE_SEGMENTS - stream.switches;
 
-            console.log(`Reached max token limit (${MAX_TOKENS}): Continuing message (${switchesLeft} switches left)`);
-
             const lastUserMessage = messages.filter((x) => x.role == 'user').slice(-1)[0];
-            const { model, provider } = extractPropertiesFromMessage(lastUserMessage);
+            const { provider } = extractPropertiesFromMessage(lastUserMessage);
+            const modelToUse = selectedModel || extractPropertiesFromMessage(lastUserMessage).model;
+
             messages.push({ id: generateId(), role: 'assistant', content });
             messages.push({
               id: generateId(),
               role: 'user',
-              content: `[Model: ${model}]\n\n[Provider: ${provider}]\n\n${CONTINUE_PROMPT}`,
+              content: `[Model: ${modelToUse}]\n\n[Provider: ${provider}]\n\n${CONTINUE_PROMPT}`,
             });
 
             const result = await streamText({
@@ -270,6 +378,7 @@ export async function POST(request: Request) {
               contextFiles: filteredFiles,
               summary,
               messageSliceId,
+              selectedModel,
             });
 
             result.mergeIntoDataStream(dataStream);
@@ -309,6 +418,7 @@ export async function POST(request: Request) {
           contextFiles: filteredFiles,
           summary,
           messageSliceId,
+          selectedModel,
         });
 
         (async () => {
@@ -323,7 +433,12 @@ export async function POST(request: Request) {
         })();
         result.mergeIntoDataStream(dataStream);
       },
-      onError: (error: any) => `Custom error: ${error.message}`,
+      onError: (error: any) => {
+        console.log('Error /chat:', error);
+
+        return `Custom error: ${error.message}`
+
+      },
     }).pipeThrough(
       new TransformStream({
         transform: (chunk, controller) => {
@@ -372,7 +487,8 @@ export async function POST(request: Request) {
       },
     });
   } catch (error: any) {
-    console.error(error);
+    console.error("Unhandled error in /chat API route:", error);
+    console.error("Error stack:", error.stack);
 
     if (error.message?.includes('API key')) {
       throw new Response('Invalid or missing API key', {
@@ -381,7 +497,7 @@ export async function POST(request: Request) {
       });
     }
 
-    throw new Response(null, {
+    throw new Response(error.message || 'Internal Server Error', {
       status: 500,
       statusText: 'Internal Server Error',
     });

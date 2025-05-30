@@ -1,36 +1,52 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# GeminiCoder
 
-## Getting Started
+A powerful AI-powered coding assistant with image upload support.
 
-First, run the development server:
+## Environment Configuration
+
+To enable image uploads, create a `.env.local` file in your project root with your AWS S3 credentials:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# S3 Configuration for Image Uploads
+S3_UPLOAD_KEY=your_aws_access_key_id
+S3_UPLOAD_SECRET=your_aws_secret_access_key  
+S3_UPLOAD_BUCKET=your_s3_bucket_name
+S3_UPLOAD_REGION=your_aws_region
+
+# Optional: Custom S3 endpoint (for services like DigitalOcean Spaces)
+# S3_UPLOAD_ENDPOINT=https://your-region.digitaloceanspaces.com
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### AWS Credential Mapping:
+- `S3_UPLOAD_KEY` = Your **AWS Access Key ID** (from AWS IAM)
+- `S3_UPLOAD_SECRET` = Your **AWS Secret Access Key** (from AWS IAM)
+- `S3_UPLOAD_BUCKET` = Your **S3 Bucket Name**
+- `S3_UPLOAD_REGION` = Your **AWS Region** (e.g., us-west-1, us-east-1)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### S3 Bucket Permissions:
+Make sure your S3 bucket has the following CORS configuration:
+```json
+[
+  {
+    "AllowedHeaders": ["*"],
+    "AllowedMethods": ["GET", "POST", "PUT"],
+    "AllowedOrigins": ["http://localhost:3000", "https://yourdomain.com"],
+    "ExposeHeaders": ["ETag"]
+  }
+]
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
+## Features
 
-## Learn More
+- AI-powered code generation and assistance
+- Image upload support with drag & drop and paste functionality
+- Real-time collaboration
+- WebContainer integration for live code execution
 
-To learn more about Next.js, take a look at the following resources:
+## Database Setup
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Init database locally:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+```bash
+docker run --name my-postgres-db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=password -e POSTGRES_DB=aichatbot -p 5432:5432 -v pgdata:/var/lib/postgresql/data -d postgres
+```

@@ -1,151 +1,222 @@
+// components/TerminalTabs.tsx
 'use client';
 
-import React, { useRef, useEffect, useState, createRef } from 'react';
-import { useWebContainer } from '@/hooks/useWebContainer';
 import Terminal, { TerminalRef } from '@/components/Terminal';
-import { cn } from '@/lib/utils';
-import { MAX_TERMINALS } from '@/stores/terminal';
-import { X, Plus, Maximize2, Minimize2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { ResizablePanel, ResizablePanelGroup, ResizableHandle } from '@/components/ui/resizable';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useWebContainer } from '@/hooks/useWebContainer';
+import { cn } from '@/lib/utils';
+import { $terminalStore, MAX_TERMINALS, terminalActions } from '@/stores/terminal'; // Updated import
+import { useStore } from '@nanostores/react';
+import { AlertCircle, Plus, Trash2, X } from 'lucide-react';
+import React, { createRef, useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
+
 
 interface TerminalTabsProps {
   className?: string;
-  onResize?: (height: string) => void;
-  height?: string;
-  defaultHeight?: string;
-  onClose?: () => void;
-  onMinimize?: () => void;
-  onMaximize?: () => void;
-  mode?: 'default' | 'minimized' | 'fullscreen';
+  terminalRef?: RefObject<TerminalRef | null>; // Main/Bolt terminal ref
 }
 
 const TerminalTabs: React.FC<TerminalTabsProps> = ({
   className,
-  onResize,
-  height,
-  defaultHeight = '250px',
-  onClose,
-  onMinimize,
-  onMaximize,
-  mode = 'default'
+  terminalRef // This is the ref for the "Bolt Terminal"
 }) => {
-  const [activeTab, setActiveTab] = useState('main');
-  const [isResizing, setIsResizing] = useState(false);
-  const [terminals, setTerminals] = useState<{ id: string; label: string }[]>([
-    { id: 'main', label: 'Bolt' }
-  ]);
-  
-  // Create refs for each terminal
-  const terminalRefs = useRef<Record<string, React.RefObject<TerminalRef>>>({});
-  
-  // Initialize the WebContainer with the main terminal reference
-  const { 
-    webContainerInstance, 
-    runNpmInstall, 
-    startDevServer,
-    isInitializingWebContainer,
-    isInstallingDeps,
-    isStartingDevServer,
-    webContainerURL,
-    runTerminalCommand
-  } = useWebContainer(terminalRefs.current['main'] as React.MutableRefObject<TerminalRef | null>);
+  const terminalStoreState = useStore($terminalStore);
+  const { sessions, activeTerminalId, terminalPanelHeight } = terminalStoreState;
+  const { webContainerInstance } = useWebContainer(terminalRef);
 
-  // Initialize refs for each terminal tab
+  const terminalInitFailuresRef = useRef<Record<string, number>>({});
+  const initializeTimeoutsRef = useRef<Record<string, NodeJS.Timeout>>({});
+  const xtermComponentRefsRef = useRef<Record<string, React.RefObject<TerminalRef>>>({});
+
+  // Create stable refs that don't get recreated unnecessarily
+  const getOrCreateTerminalRef = useCallback((sessionId: string) => {
+    if (sessionId === 'bolt') {
+      return terminalRef;
+    }
+    
+    if (!xtermComponentRefsRef.current[sessionId]) {
+      xtermComponentRefsRef.current[sessionId] = createRef<TerminalRef>();
+      console.log(`Created new ref for terminal: ${sessionId}`);
+    }
+    
+    return xtermComponentRefsRef.current[sessionId];
+  }, [terminalRef]);
+
+  // Clean up refs for removed sessions
   useEffect(() => {
-    terminals.forEach(terminal => {
-      if (!terminalRefs.current[terminal.id]) {
-        terminalRefs.current[terminal.id] = createRef<TerminalRef>();
+    const currentSessionIds = Object.keys(sessions);
+    const refSessionIds = Object.keys(xtermComponentRefsRef.current);
+    
+    // Remove refs for sessions that no longer exist
+    refSessionIds.forEach(sessionId => {
+      if (!currentSessionIds.includes(sessionId)) {
+        console.log(`Cleaning up ref for removed terminal: ${sessionId}`);
+        delete xtermComponentRefsRef.current[sessionId];
       }
     });
-  }, [terminals]);
+  }, [sessions]);
 
-  // Handle terminal resize
-  const handleTerminalResize = (cols: number, rows: number, id: string = 'main') => {
-    console.log(`Terminal ${id} resized to ${cols}x${rows}`);
-  };
+  useEffect(() => {
+    return () => {
+      Object.values(initializeTimeoutsRef.current).forEach(timeout => {
+        clearTimeout(timeout);
+      });
+    };
+  }, []);
 
-  // Add a new terminal tab
-  const addTerminal = () => {
-    if (terminals.length >= MAX_TERMINALS) {
-      console.warn(`Maximum number of terminals (${MAX_TERMINALS}) reached`);
+  const handleTerminalResize = useCallback((cols: number, rows: number, id: string) => {
+    if (terminalActions?.updateTerminalDimensions) {
+      console.log(`Terminal ${id} dimensions updated to ${cols}x${rows}`);
+      terminalActions.updateTerminalDimensions(id, cols, rows);
+    }
+  }, [terminalActions]);
+
+  const safeInitializeTerminal = useCallback((terminalId: string) => {
+    // Skip initialization for 'bolt' terminal, it's managed by persistent shell logic
+    if (terminalId === 'bolt') {
+      return;
+    }
+    // Limit retries to prevent excessive attempts
+    if (!terminalId || (terminalInitFailuresRef.current[terminalId] || 0) >= 3) {
+      console.warn(`Terminal ${terminalId} initialization skipped after too many failures`);
       return;
     }
 
-    const newId = `terminal-${Date.now()}`;
-    const newTerminals = [...terminals, { id: newId, label: `Terminal ${terminals.length}` }];
-    setTerminals(newTerminals);
-    setActiveTab(newId);
-  };
-
-  // Close a terminal tab
-  const closeTerminal = (id: string, event?: React.MouseEvent) => {
-    event?.stopPropagation();
-    if (terminals.length <= 1) return; // Keep at least one terminal
-
-    const newTerminals = terminals.filter(t => t.id !== id);
-    setTerminals(newTerminals);
-
-    // If closing the active tab, set the first available as active
-    if (activeTab === id) {
-      setActiveTab(newTerminals[0].id);
+    // If there's a pending timeout for this terminal, clear it
+    if (initializeTimeoutsRef.current[terminalId]) {
+      clearTimeout(initializeTimeoutsRef.current[terminalId]);
     }
-  };
 
-  // Handle panel resizing
-  const handlePanelResize = (sizes: number[]) => {
-    if (!isResizing) return;
-    const containerHeight = document.getElementById('terminal-container')?.clientHeight || 300;
-    const newHeight = `${Math.round(containerHeight * sizes[0] / 100)}px`;
-    onResize?.(newHeight);
-  };
+    initializeTimeoutsRef.current[terminalId] = setTimeout(() => {
+      const termRef = terminalId === 'bolt' ? terminalRef : getOrCreateTerminalRef(terminalId);
 
-  // Clear the active terminal
-  const clearTerminal = () => {
-    terminalRefs.current[activeTab]?.current?.clearTerminal();
-  };
+      // If terminal or WebContainer isn't available, track failure and retry up to 3 times
+      if (!termRef?.current || !webContainerInstance) {
+        terminalInitFailuresRef.current[terminalId] = (terminalInitFailuresRef.current[terminalId] || 0) + 1;
+
+        if (terminalInitFailuresRef.current[terminalId] < 3) {
+          console.log(`Terminal ${terminalId} initialization failed, retrying...`);
+          safeInitializeTerminal(terminalId);
+        } else {
+          console.error(`Terminal ${terminalId} initialization failed after multiple attempts`);
+        }
+        return;
+      }
+
+      console.log(`Terminal ${terminalId} initialized successfully`);
+      delete terminalInitFailuresRef.current[terminalId];
+    }, 300);
+  }, [terminalRef, getOrCreateTerminalRef, webContainerInstance]);
+
+  useEffect(() => {
+    if (activeTerminalId && sessions[activeTerminalId] && activeTerminalId !== 'bolt') {
+      safeInitializeTerminal(activeTerminalId);
+    }
+  }, [activeTerminalId, sessions, safeInitializeTerminal]);
+
+  const handleAddNewTerminal = useCallback(async () => {
+    if (Object.keys(sessions).length >= MAX_TERMINALS) {
+      console.warn(`Maximum number of terminals (${MAX_TERMINALS}) reached.`);
+      return;
+    }
+
+    const newTerminalId = terminalActions.createNewTerminal();
+    if (newTerminalId) {
+      terminalActions.setActiveTerminal(newTerminalId);
+
+      safeInitializeTerminal(newTerminalId);
+    }
+  }, [sessions, safeInitializeTerminal]);
+
+  const handleCloseTerminal = useCallback((id: string, event?: React.MouseEvent) => {
+    if (event) {
+      event.stopPropagation();
+    }
+
+    if (id === 'bolt') {
+      console.warn("Cannot close the main Bolt terminal.");
+      return;
+    }
+
+    // Clear any pending initialization timeouts
+    if (initializeTimeoutsRef.current[id]) {
+      clearTimeout(initializeTimeoutsRef.current[id]);
+      delete initializeTimeoutsRef.current[id];
+    }
+
+    // Clear initialization failure records
+    delete terminalInitFailuresRef.current[id];
+
+    terminalActions.closeTerminal(id);
+  }, []);
+
+  const handleClearActiveTerminal = useCallback(() => {
+    const refToClear = activeTerminalId === 'bolt'
+      ? terminalRef
+      : getOrCreateTerminalRef(activeTerminalId);
+
+    if (refToClear?.current) {
+      refToClear.current.clearTerminal();
+    }
+  }, [activeTerminalId, terminalRef, getOrCreateTerminalRef]);
+
+  const terminalSessionsArray = Object.values(sessions);
+
+  if (terminalSessionsArray.length === 0) {
+    return null;
+  }
 
   return (
-    <div 
+    <div
       id="terminal-container"
       className={cn(
-        "border-t border-[#2a2a2c] bg-[#161618]",
+        "border-t border-[#2a2a2c] bg-[#101012]",
         className
       )}
-      style={{ height: height || defaultHeight }}
+      style={{ height: terminalPanelHeight }}
     >
-      <Tabs 
-        value={activeTab} 
-        onValueChange={setActiveTab}
+      <Tabs
+        value={activeTerminalId}
+        onValueChange={(newTabId) => {
+          if (sessions[newTabId]) {
+            terminalActions.setActiveTerminal(newTabId);
+          }
+        }}
         className="h-full flex flex-col"
       >
-        {/* Terminal tabs header */}
-        <div className="flex items-center justify-between px-2 border-b border-[#2a2a2c]">
-          <TabsList className="bg-transparent h-9 border-b-0">
-            {terminals.map(terminal => (
+        <div className="flex items-center justify-between px-2 border-b border-[#2a2a2c] bg-[#161618] h-10 flex-shrink-0">
+          <TabsList className="bg-transparent h-full border-b-0 p-0">
+            {terminalSessionsArray.map(session => (
               <TabsTrigger
-                key={terminal.id}
-                value={terminal.id}
-                className="relative data-[state=active]:bg-[#1a1a1c] data-[state=active]:shadow-none data-[state=active]:border-transparent px-3 py-1.5 h-8 text-xs"
+                key={session.id}
+                value={session.id}
+                className="relative data-[state=active]:bg-[#1f1f21] data-[state=active]:shadow-none data-[state=active]:text-white data-[state=inactive]:text-[#888888] px-3 py-1 h-full text-xs rounded-none border-r border-[#2a2a2c] last:border-r-0 data-[state=active]:border-b-2 data-[state=active]:border-b-blue-500 data-[state=inactive]:border-b-2 data-[state=inactive]:border-b-transparent"
               >
-                {terminal.label}
-                {terminals.length > 1 && (
+                {session.label}
+                {terminalInitFailuresRef.current[session.id] >= 3 && (
+                  <span className="absolute -top-1 -right-1 text-red-500">
+                    <AlertCircle size={12} />
+                  </span>
+                )}
+                {session.type === 'standard' && terminalSessionsArray.length > 1 && (
                   <button
-                    onClick={(e) => closeTerminal(terminal.id, e)}
-                    className="ml-2 text-[#6e6e6e] hover:text-white"
+                    onClick={(e) => handleCloseTerminal(session.id, e)}
+                    className="ml-2 text-[#6e6e6e] hover:text-white absolute right-1 top-1/2 -translate-y-1/2 p-0.5 hover:bg-[#313133] rounded-full"
+                    aria-label={`Close ${session.label}`}
                   >
-                    <X size={14} />
+                    <X size={12} />
                   </button>
                 )}
               </TabsTrigger>
             ))}
-            {terminals.length < MAX_TERMINALS && (
+            {terminalSessionsArray.length < MAX_TERMINALS && (
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-8 w-8 text-[#6e6e6e] hover:text-white"
-                onClick={addTerminal}
+                className="h-full w-8 text-[#888888] hover:text-white rounded-none border-r border-[#2a2a2c]"
+                onClick={handleAddNewTerminal}
+                aria-label="Add new terminal"
               >
                 <Plus size={14} />
               </Button>
@@ -155,63 +226,43 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 text-[#6e6e6e] hover:text-white"
-              onClick={clearTerminal}
+              className="h-8 w-8 text-[#888888] hover:text-white"
+              onClick={handleClearActiveTerminal}
+              aria-label="Clear active terminal"
+              title="Clear Terminal"
             >
-              <X size={14} />
+              <Trash2 size={14} />
             </Button>
-            {mode === 'default' && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-[#6e6e6e] hover:text-white"
-                  onClick={onMinimize}
-                >
-                  <Minimize2 size={14} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-[#6e6e6e] hover:text-white"
-                  onClick={onMaximize}
-                >
-                  <Maximize2 size={14} />
-                </Button>
-              </>
-            )}
           </div>
         </div>
 
-        {/* Terminal content */}
-        <div className="flex-1 overflow-hidden">
-          {terminals.map(terminal => (
-            <TabsContent 
-              key={terminal.id} 
-              value={terminal.id}
-              className="h-full data-[state=active]:flex-1 data-[state=active]:flex mt-0 border-0"
-            >
-              <Terminal
-                id={terminal.id}
-                ref={terminalRefs.current[terminal.id]}
-                active={activeTab === terminal.id}
-                onResize={(cols, rows) => handleTerminalResize(cols, rows, terminal.id)}
-                className="h-full"
-                mode={mode}
-                initialOptions={{
-                  fontSize: 14,
-                  theme: {
-                    background: '#151718',
-                    foreground: '#f8f8f8'
-                  }
-                }}
-              />
-            </TabsContent>
-          ))}
+        <div className="flex-1 overflow-hidden bg-[#151718]">
+          {terminalSessionsArray.map(session => {
+            // We need a unique key for tab content even if we conditionally render the Terminal
+            const isActive = activeTerminalId === session.id;
+
+            return (
+              <TabsContent
+                key={session.id}
+                value={session.id}
+                className="h-full data-[state=active]:flex data-[state=active]:flex-col mt-0 border-0 p-0"
+              >
+                {(isActive || session.id === 'bolt') && (
+                  <Terminal
+                    id={session.id}
+                    ref={session.id === 'bolt' ? terminalRef : getOrCreateTerminalRef(session.id)}
+                    active={isActive}
+                    onResize={(cols, rows) => handleTerminalResize(cols, rows, session.id)}
+                  />
+                )}
+              </TabsContent>
+            );
+          })}
         </div>
       </Tabs>
     </div>
   );
 };
 
-export default TerminalTabs;
+// Use React.memo to prevent unnecessary re-renders
+export default React.memo(TerminalTabs);
