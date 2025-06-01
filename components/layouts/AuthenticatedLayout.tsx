@@ -29,7 +29,7 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
     return (
       <div className="flex min-h-screen items-center justify-center p-4 md:p-8 bg-[#101012]">
         <div className="text-center">
-          <h1 className="text-2xl font-bold mb-4 text-white">AI Chat Bot</h1>
+          <h1 className="text-2xl font-bold mb-4 text-white">Yep Chat Bot</h1>
           <p className="text-gray-500">Checking authentication...</p>
         </div>
       </div>

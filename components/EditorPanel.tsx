@@ -12,13 +12,15 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/componen
 // import { useWebContainer } from '@/hooks/useWebContainer'; // Not directly needed if save/reset are higher up
 // import { toast } from '../ui/use-toast'; // Toasts are handled higher up
 import FileExplorer from '@/app/components/chat/FileExplorer';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { WORK_DIR } from '@/lib/prompt';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@radix-ui/react-tabs';
-import { useCallback, useEffect, useMemo, useRef } from 'react'; // Added useCallback
+import { useCallback, useMemo } from 'react';
 import CodeEditor2 from './chat/CodeEditor2';
 import { FileBreadcrumb } from './chat/FileBreadcrumb';
 import { SearchPanel } from './SearchPanel';
-import { ScrollArea } from '@/components/ui/scroll-area';
+
+
 
 interface EditorPanelProps {
   // EditorPanel will now mostly read from the $workbench store.
@@ -31,7 +33,8 @@ interface EditorPanelProps {
 export function EditorPanel({ isStreaming }: EditorPanelProps) {
   const workbenchState = useStore($workbench);
   const { files, selectedFile, currentDocument, unsavedFiles } = workbenchState;
-  const chatContainerRef = useRef<HTMLDivElement>(null);
+  // Removed chatContainerRef
+  // const chatContainerRef = useRef<HTMLDivElement>(null);
 
   const handleFileSelectInTree = useCallback((filePath: string | undefined) => {
     setSelectedWorkbenchFile(filePath || null);
@@ -54,61 +57,28 @@ export function EditorPanel({ isStreaming }: EditorPanelProps) {
   }, [currentDocument?.filePath]);
 
 
-  const scrollToBottom = () => {
-    if (chatContainerRef.current) {
-      const scrollContainer = chatContainerRef.current.querySelector('[data-radix-scroll-area-viewport]');
-      if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      }
-    }
-  };
-
-
-  const handleScroll = () => {
-    if (chatContainerRef.current) {
-      const scrollContainer = chatContainerRef.current.querySelector('[data-radix-scroll-area-viewport]');
-      if (scrollContainer) {
-        const { scrollTop, scrollHeight, clientHeight } = scrollContainer;
-        // Consider "at bottom" if within 50px of the bottom
-      }
-    }
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-
-    // Add scroll event listener
-    const scrollContainer = chatContainerRef.current?.querySelector('[data-radix-scroll-area-viewport]');
-    if (scrollContainer) {
-      scrollContainer.addEventListener('scroll', handleScroll);
-      return () => scrollContainer.removeEventListener('scroll', handleScroll);
-    }
-  }, []);
-
-
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
       <ResizablePanel defaultSize={25} minSize={15} className="bg-[#101012] flex flex-col min-w-[200px]">
         <Tabs defaultValue="files" className="flex flex-col flex-1 h-full overflow-hidden">
-          <TabsList className="bg-[#101012] border-b border-[#313133] rounded-none justify-start px-2 h-10">
+          <TabsList className="bg-[#101012] border-b border-[#313133] rounded-none justify-start h-10">
             <TabsTrigger value="files" className="px-3 py-1.5 text-xs data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]">Files</TabsTrigger>
             <TabsTrigger value="search" className="px-3 py-1.5 text-xs data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]">Search</TabsTrigger>
             {/* <TabsTrigger value="locks" className="px-3 py-1.5 text-xs data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]">Locks</TabsTrigger> */}
           </TabsList>
-          <ScrollArea className="h-full bg-[#101012]" ref={chatContainerRef}>
-            <TabsContent value="files" className="flex-1 mt-0 p-1">
-
+          <TabsContent value="files" className="flex-1 mt-0 overflow-hidden bg-[#101012]">
+            <ScrollArea className="h-full w-full p-1">
               {Object.keys(files).length === 0 ? (
                 <div className="text-center text-xs text-[#969798] pt-4">No files in project.</div>
               ) : (
                 <FileExplorer
-                  files={Object.keys(files)} // Pass only paths
+                  files={Object.keys(files)}
                   selectedFile={selectedFile}
                   onSelectFile={handleFileSelectInTree}
                 />
               )}
-            </TabsContent>
-          </ScrollArea>
+            </ScrollArea>
+          </TabsContent>
           <TabsContent value="search" className="flex-1 overflow-auto mt-0">
             <SearchPanel />
           </TabsContent>

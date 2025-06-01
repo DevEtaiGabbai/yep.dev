@@ -1,5 +1,5 @@
 
-import { TerminalRef } from '@/components/Terminal'; // Keep TerminalRef import
+import { TerminalRef } from '@/components/Terminal';
 import { WebContainer } from '@webcontainer/api';
 import { WORK_DIR_NAME } from './prompt';
 import { PersistentShell, createPersistentShell } from './shell';
@@ -45,7 +45,7 @@ class WebContainerManager {
     if (this.shellInitialized && this.persistentShell.isInitialized()) {
       if (terminalComponentRef && this.persistentShell.isInitialized()) {
         try {
-          // The restore method in PersistentShell now expects an XTermTerminal instance
+
           if (terminalComponentRef.terminal) {
             await this.persistentShell.restore(terminalComponentRef.terminal);
           } else {
@@ -72,7 +72,6 @@ class WebContainerManager {
         return;
       }
 
-      // Critical check: Ensure terminalComponentRef and its .terminal property are valid
       if (!terminalComponentRef?.terminal) {
         console.warn("WebContainerManager: initializeShell called but terminalComponentRef.terminal (XTerm instance) is not yet available.");
         this.shellInitPromise = null;

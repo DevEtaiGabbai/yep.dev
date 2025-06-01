@@ -1,14 +1,15 @@
-import React, { useState, useEffect, useCallback } from "react";
 import { IconButton } from "@/components/ui/IconButton";
-import { ProviderInfo } from "@/lib/types";
-import { Check, CircleX, KeyRound, Pencil, X, Loader2 } from "lucide-react";
 import { ApiKeyCache } from "@/lib/api-key-cache";
+import { ProviderInfo } from "@/lib/types";
+import { Check, CircleX, KeyRound, Loader2, Pencil, X } from "lucide-react";
+import React, { useCallback, useEffect, useState } from "react";
 
 interface APIKeyManagerProps {
   provider: ProviderInfo;
   onApiKeyChange?: (hasValidKey: boolean) => void;
   getApiKeyLink?: string;
   labelForGetApiKey?: string;
+  userId?: string | null;
 }
 
 interface ApiKey {
@@ -22,6 +23,7 @@ interface ApiKey {
 export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
   provider,
   onApiKeyChange,
+  userId,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [tempKey, setTempKey] = useState("");
@@ -35,12 +37,11 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
   const loadApiKeys = useCallback(async () => {
     try {
       setIsLoading(true);
-      
-      // Try to get from cache first
-      const cachedKey = ApiKeyCache.get(provider.name);
+
+      const cachedKey = userId ? ApiKeyCache.get(provider.name, userId) : null;
       if (cachedKey) {
         const mockApiKey: ApiKey = {
-          id: 'cached',
+          id: 'cached-' + userId,
           name: `${provider.name} API Key`,
           provider: provider.name,
           key: cachedKey,
@@ -52,19 +53,16 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
         setIsLoading(false);
         return;
       }
-      
-      // If not in cache, fetch from database
       const response = await fetch('/api/api-keys');
-      
       if (response.ok) {
         const data = await response.json();
         const apiKey = data.apiKeys.find((key: ApiKey) => key.provider === provider.name);
-        
         if (apiKey) {
           setCurrentApiKey(apiKey);
           setTempKey(apiKey.key);
-          // Update cache
-          ApiKeyCache.set(provider.name, apiKey.key);
+          if (userId) {
+            ApiKeyCache.set(provider.name, apiKey.key, userId);
+          }
           onApiKeyChange?.(true);
         } else {
           setCurrentApiKey(null);
@@ -72,18 +70,19 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
           onApiKeyChange?.(false);
         }
       } else {
-        // Even if the request fails (e.g., due to auth), we should still allow API key input
         setCurrentApiKey(null);
         setTempKey("");
         onApiKeyChange?.(false);
       }
     } catch (error) {
       console.error("Failed to load API keys:", error);
+      setCurrentApiKey(null);
+      setTempKey("");
       onApiKeyChange?.(false);
     } finally {
       setIsLoading(false);
     }
-  }, [provider.name, onApiKeyChange]);
+  }, [provider.name, onApiKeyChange, userId]);
 
   useEffect(() => {
     loadApiKeys();
@@ -121,7 +120,7 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
 
     // First verify the API key
     const isValid = await verifyApiKey(tempKey);
-    
+
     if (!isValid) {
       setError("Invalid API key. Please check and try again.");
       return;
@@ -129,7 +128,7 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
 
     try {
       setIsLoading(true);
-      
+
       const response = await fetch('/api/api-keys', {
         method: 'POST',
         headers: {
@@ -145,14 +144,16 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
       if (response.ok) {
         const data = await response.json();
         setCurrentApiKey(data.apiKey);
-        
+
         // Update cache
-        ApiKeyCache.set(provider.name, data.apiKey.key);
-        
+        if (userId) {
+          ApiKeyCache.set(provider.name, data.apiKey.key, userId);
+        }
+
         setIsEditing(false);
         setSuccess("API key saved successfully!");
         onApiKeyChange?.(true);
-        
+
         // Clear success message after 3 seconds
         setTimeout(() => setSuccess(null), 3000);
       } else {

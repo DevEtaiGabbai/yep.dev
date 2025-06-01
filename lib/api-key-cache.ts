@@ -4,125 +4,141 @@ interface ApiKeyCacheMap {
     [provider: string]: string;
 }
 
-// Cookie key for storing API keys
-const API_KEY_COOKIE = 'apiKeys';
+const getCookieNameForUser = (userId: string | null | undefined): string => {
+    if (userId) {
+        return `apiKeys_${userId}`;
+    }
+    return 'apiKeys_guest';
+};
+
 const CACHE_EXPIRY_DAYS = 30;
 
 export class ApiKeyCache {
     /**
-     * Get API key from cache (cookie)
+     * Get API key from user-specific cache (cookie)
      */
-    static get(provider: string): string | null {
+    static get(userId: string | null, provider: string): string | null {
         try {
-            const cached = Cookies.get(API_KEY_COOKIE);
+            const cookieName = getCookieNameForUser(userId);
+            const cached = Cookies.get(cookieName);
             if (!cached) return null;
 
             const apiKeys: ApiKeyCacheMap = JSON.parse(cached);
             return apiKeys[provider] || null;
         } catch (error) {
-            console.error('Error reading API key cache:', error);
+            console.error('Error reading API key cache for user:', userId, error);
             return null;
         }
     }
 
     /**
-     * Set API key in cache (cookie)
+     * Set API key in user-specific cache (cookie)
      */
-    static set(provider: string, apiKey: string): void {
+    static set(userId: string | null, provider: string, apiKey: string): void {
         try {
-            const existing = this.getAll();
+            const cookieName = getCookieNameForUser(userId);
+            const existing = this.getAll(userId); // Get all keys for this specific user
             existing[provider] = apiKey;
-            
-            Cookies.set(API_KEY_COOKIE, JSON.stringify(existing), { 
-                expires: CACHE_EXPIRY_DAYS 
+
+            Cookies.set(cookieName, JSON.stringify(existing), {
+                expires: CACHE_EXPIRY_DAYS
             });
         } catch (error) {
-            console.error('Error setting API key cache:', error);
+            console.error('Error setting API key cache for user:', userId, error);
         }
     }
 
     /**
-     * Remove API key from cache
+     * Remove API key from user-specific cache
      */
-    static remove(provider: string): void {
+    static remove(userId: string | null, provider: string): void {
         try {
-            const existing = this.getAll();
+            const cookieName = getCookieNameForUser(userId);
+            const existing = this.getAll(userId); // Get all keys for this specific user
             delete existing[provider];
-            
+
             if (Object.keys(existing).length === 0) {
-                Cookies.remove(API_KEY_COOKIE);
+                Cookies.remove(cookieName);
             } else {
-                Cookies.set(API_KEY_COOKIE, JSON.stringify(existing), { 
-                    expires: CACHE_EXPIRY_DAYS 
+                Cookies.set(cookieName, JSON.stringify(existing), {
+                    expires: CACHE_EXPIRY_DAYS
                 });
             }
         } catch (error) {
-            console.error('Error removing API key from cache:', error);
+            console.error('Error removing API key from cache for user:', userId, error);
         }
     }
 
     /**
-     * Get all cached API keys
+     * Get all cached API keys for a specific user
      */
-    static getAll(): ApiKeyCacheMap {
+    static getAll(userId: string | null): ApiKeyCacheMap {
         try {
-            const cached = Cookies.get(API_KEY_COOKIE);
+            const cookieName = getCookieNameForUser(userId);
+            const cached = Cookies.get(cookieName);
             return cached ? JSON.parse(cached) : {};
         } catch (error) {
-            console.error('Error reading API key cache:', error);
+            console.error('Error reading API key cache for user:', userId, error);
             return {};
         }
     }
 
     /**
-     * Clear all cached API keys
+     * Clear all cached API keys for a specific user
      */
-    static clear(): void {
-        Cookies.remove(API_KEY_COOKIE);
+    static clear(userId: string | null): void {
+        const cookieName = getCookieNameForUser(userId);
+        Cookies.remove(cookieName);
     }
 
     /**
-     * Check if a provider has a cached API key
+     * Check if a provider has a cached API key for a specific user
      */
-    static has(provider: string): boolean {
-        return this.get(provider) !== null;
+    static has(userId: string | null, provider: string): boolean {
+        return this.get(userId, provider) !== null;
     }
 
     /**
-     * Refresh cache from server
+     * Refresh cache from server for a specific user
+     * This assumes /api/api-keys endpoint is user-aware via session cookie
+     * and returns keys appropriate for the authenticated user.
      */
-    static async refresh(): Promise<void> {
+    static async refresh(userId: string | null): Promise<void> {
         try {
-            const response = await fetch('/api/api-keys');
+            const response = await fetch('/api/api-keys'); // This fetch should be authenticated
             if (response.ok) {
                 const data = await response.json();
-                const apiKeyCache: ApiKeyCacheMap = {};
-                
-                data.apiKeys?.forEach((apiKey: any) => {
-                    apiKeyCache[apiKey.provider] = apiKey.key;
+                const apiKeyCacheMap: ApiKeyCacheMap = {};
+
+                // Assuming data.apiKeys is an array of {provider: string, key: string}
+                data.apiKeys?.forEach((apiKey: { provider: string, key: string }) => {
+                    apiKeyCacheMap[apiKey.provider] = apiKey.key;
                 });
-                
-                Cookies.set(API_KEY_COOKIE, JSON.stringify(apiKeyCache), { 
-                    expires: CACHE_EXPIRY_DAYS 
+
+                const cookieName = getCookieNameForUser(userId);
+                Cookies.set(cookieName, JSON.stringify(apiKeyCacheMap), {
+                    expires: CACHE_EXPIRY_DAYS
                 });
+            } else {
+                console.error('Failed to refresh API key cache from server, status:', response.status);
             }
         } catch (error) {
-            console.error('Error refreshing API key cache:', error);
+            console.error('Error refreshing API key cache for user:', userId, error);
         }
     }
 }
 
 /**
- * Hook for using API key cache with React
+ * Hook for using user-specific API key cache with React
  */
-export function useApiKeyCache() {
-    const get = (provider: string) => ApiKeyCache.get(provider);
-    const set = (provider: string, apiKey: string) => ApiKeyCache.set(provider, apiKey);
-    const remove = (provider: string) => ApiKeyCache.remove(provider);
-    const getAll = () => ApiKeyCache.getAll();
-    const clear = () => ApiKeyCache.clear();
-    const has = (provider: string) => ApiKeyCache.has(provider);
-    const refresh = () => ApiKeyCache.refresh();
+export function useApiKeyCache(userId: string | null) {
+    const get = (provider: string) => ApiKeyCache.get(userId, provider);
+    const set = (provider: string, apiKey: string) => ApiKeyCache.set(userId, provider, apiKey);
+    const remove = (provider: string) => ApiKeyCache.remove(userId, provider);
+    const getAll = () => ApiKeyCache.getAll(userId);
+    const clear = () => ApiKeyCache.clear(userId);
+    const has = (provider: string) => ApiKeyCache.has(userId, provider);
+    const refresh = () => ApiKeyCache.refresh(userId);
 
     return {
         get,
@@ -133,4 +149,4 @@ export function useApiKeyCache() {
         has,
         refresh
     };
-} 
+}

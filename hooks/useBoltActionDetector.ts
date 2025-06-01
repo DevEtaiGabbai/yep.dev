@@ -1,8 +1,7 @@
-// hooks/useBoltActionDetector.ts
 'use client';
 
-import { setWorkbenchView, updateFileInWorkbench } from '@/app/lib/stores/workbenchStore'; // Assuming this store is for Next.js
-import { terminalActions } from '@/stores/terminal'; // Assuming this is your terminal store
+import { setWorkbenchView, updateFileInWorkbench } from '@/app/lib/stores/workbenchStore';
+import { terminalActions } from '@/stores/terminal';
 import { WebContainer } from '@webcontainer/api';
 import he from 'he';
 import { useCallback, useEffect, useRef, useState } from 'react';

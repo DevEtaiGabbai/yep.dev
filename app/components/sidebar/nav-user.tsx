@@ -38,7 +38,8 @@ export function NavUser({
   const { isMobile } = useSidebar()
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
-  const [open, setOpen] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [dropdownOpen, setDropdownOpen] = useState(false)
 
   const handleSubscription = async () => {
     try {
@@ -58,11 +59,16 @@ export function NavUser({
     }
   }
 
+  const handleOpenModal = () => {
+    setDropdownOpen(false)
+    setModalOpen(true)
+  }
+
   return (
     <>
       <SidebarMenu>
         <SidebarMenuItem>
-          <DropdownMenu>
+          <DropdownMenu open={dropdownOpen} onOpenChange={setDropdownOpen}>
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
                 size="lg"
@@ -87,7 +93,7 @@ export function NavUser({
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => setOpen(true)}>
+                <DropdownMenuItem onSelect={handleOpenModal}>
                   <BadgeCheck />
                   Update API Keys
                 </DropdownMenuItem>
@@ -104,7 +110,7 @@ export function NavUser({
           </DropdownMenu>
         </SidebarMenuItem>
       </SidebarMenu>
-      <ModalUpdateApiKeys open={open} setOpen={setOpen} />
+      <ModalUpdateApiKeys open={modalOpen} setOpen={setModalOpen} />
     </>
   )
 }

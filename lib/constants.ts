@@ -17,22 +17,22 @@ export const GITHUB_REPO_URL = 'https://github.com/thecodacus/bolt-nextjs-shadcn
 export const GITHUB_API_BASE_URL = 'https://api.github.com';
 export const MAX_TOKENS_NO_SUMMARY = 8000; // Maximum tokens before requiring chat summary
 export const IGNORE_PATTERNS = [
-    'node_modules/**',
-    '.git/**',
-    'dist/**',
-    'build/**',
-    '.next/**',
-    'coverage/**',
-    '.cache/**',
-    '.vscode/**',
-    '.idea/**',
-    '**/*.log',
-    '**/.DS_Store',
-    '**/npm-debug.log*',
-    '**/yarn-debug.log*',
-    '**/yarn-error.log*',
-    '**/*lock.json',
-    '**/*lock.yml',
+  'node_modules/**',
+  '.git/**',
+  'dist/**',
+  'build/**',
+  '.next/**',
+  'coverage/**',
+  '.cache/**',
+  '.vscode/**',
+  '.idea/**',
+  '**/*.log',
+  '**/.DS_Store',
+  '**/npm-debug.log*',
+  '**/yarn-debug.log*',
+  '**/yarn-error.log*',
+  '**/*lock.json',
+  '**/*lock.yml',
 ];
 
 export interface File {
@@ -112,7 +112,7 @@ export const STARTER_TEMPLATES: Template[] = [
 ];
 
 // Default template when user enters prompt without selecting a template
-export const DEFAULT_TEMPLATE = STARTER_TEMPLATES.find(t => t.name === 'bolt-nextjs-shadcn1') || STARTER_TEMPLATES[2];
+export const DEFAULT_TEMPLATE = STARTER_TEMPLATES.find(t => t.name === 'bolt-vite-react') || STARTER_TEMPLATES[2];
 
 // Maximum time in milliseconds to wait for a terminal command to complete
 export const MAX_TERMINAL_EXECUTION_TIME = 15000; // 15 seconds

@@ -1,23 +1,18 @@
-// hooks/useAIChat.ts
 'use client';
 
 import { $workbench, setWorkbenchView } from '@/app/lib/stores/workbenchStore';
 import { WORK_DIR } from '@/lib/prompt';
 import { Message } from '@/lib/services/conversationService';
 import { getAllFilesFromWebContainer } from '@/lib/services/webContainerSync';
-// import { ConversationMessage as AppConversationMessage } from '@/lib/services/conversationService'; // Use your defined type
 import { ProgressIndicator } from '@/lib/types/index';
 import { TerminalActions } from '@/stores/terminal';
 import { WebContainer } from '@webcontainer/api';
 import he from 'he';
 import { useCallback, useEffect, useRef, useState } from 'react';
-
-// Import UploadedImage type
 import { UploadedImage } from './useImageUpload';
 
 const BOLT_ACTION_TAG_OPEN = '<boltAction';
 const BOLT_ACTION_TAG_CLOSE = '</boltAction>';
-// const BOLT_ARTIFACT_TAG_OPEN = '<boltArtifact'; // Keep if needed for artifact title parsing
 
 interface AIChatMessage {
 	role: 'user' | 'assistant' | 'system';
@@ -28,7 +23,6 @@ interface AIChatMessage {
 			url: string;
 		};
 	}>;
-	// id?: string; // Optional if you track IDs client-side for list keys
 }
 
 interface FileExtractionState {
@@ -47,7 +41,7 @@ type DirectoryActionCallback = (dirPath: string) => Promise<void>;
 type TerminalActionCallback = (command: string) => Promise<void>;
 
 // Helper functions to handle mixed content types
-const getTextContent = (content: string | Array<{type: 'text' | 'image_url'; text?: string; image_url?: {url: string}}>): string => {
+const getTextContent = (content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>): string => {
 	if (typeof content === 'string') {
 		return content;
 	}
@@ -57,30 +51,6 @@ const getTextContent = (content: string | Array<{type: 'text' | 'image_url'; tex
 		.map(item => item.text)
 		.join(' ');
 };
-
-const isStringContent = (content: string | Array<{type: 'text' | 'image_url'; text?: string; image_url?: {url: string}}>): content is string => {
-	return typeof content === 'string';
-};
-
-// Helper to extract boltAction tags (moved outside the hook for clarity)
-const extractBoltActionTags = (content: string) => {
-	const actions: { type: string; filePath?: string; content: string }[] = [];
-	const fileActionRegex = /<boltAction\s+type="file"\s+filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g;
-	let match;
-	while ((match = fileActionRegex.exec(content)) !== null) {
-		const [_, filePath, fileContent] = match;
-		actions.push({ type: 'file', filePath: he.decode(filePath.trim()), content: he.decode(fileContent.trim()) });
-	}
-	const shellActionRegex = /<boltAction\s+type="(shell|command)"[^>]*>([\s\S]*?)<\/boltAction>/g;
-	while ((match = shellActionRegex.exec(content)) !== null) {
-		const [_, actionType, commandContent] = match;
-		actions.push({ type: actionType, content: he.decode(commandContent.trim()) });
-	}
-	return actions;
-};
-
-// Add type for workbench store at the top of the file, outside of any functions
-// This fixes the "ambient module declaration" error
 declare global {
 	interface Window {
 		$workbench?: {
@@ -98,22 +68,20 @@ declare global {
 
 export const useAIChat = (
 	webContainerInstance: WebContainer | null,
-	_selectedFileInStore: string | null, // Renamed to avoid conflict if selectedFile state is added here
+	_selectedFileInStore: string | null,
 	setSelectedFileInEditor: (file: string | null) => void,
 	runTerminalCommand?: (command: string, terminalId: string) => Promise<{ exitCode: number }>,
 	terminalActions?: TerminalActions,
 	initialMessagesProp?: Message[],
-	conversationId?: string | null, // Pass conversationId for saving messages
-	selectedModel?: string, // Add parameter for selected model
-	projectId?: string | null, // Add projectId for file syncing
-	userId?: string | null // Add userId for file syncing
+	conversationId?: string | null,
+	selectedModel?: string,
+	projectId?: string | null,
+	userId?: string | null
 ) => {
 	// Transform initialMessagesProp to AIChatMessage format
 	const transformedInitialMessages: AIChatMessage[] = initialMessagesProp
 		? initialMessagesProp.map(m => ({ role: m.role, content: m.content /*, id: m.id */ }))
 		: [];
-
-	console.log(`useAIChat initialization: ${transformedInitialMessages.length} messages from initialMessagesProp`);
 
 	const [messages, setMessages] = useState<AIChatMessage[]>(transformedInitialMessages);
 	const [input, setInput] = useState('');
@@ -180,7 +148,6 @@ export const useAIChat = (
 
 			if (response.ok) {
 				const result = await response.json();
-				console.log(`Auto-synced ${result.fileCount} files to project ${projectId}`);
 			} else {
 				console.error('Failed to sync files:', response.statusText);
 			}
@@ -204,7 +171,6 @@ export const useAIChat = (
 	};
 
 	const processSpecialContent = useCallback((data: any) => {
-		// ... (same as your provided implementation) ...
 		if (!data) return;
 		try {
 			if (data.type === 'progress') {
@@ -239,7 +205,7 @@ export const useAIChat = (
 
 
 	const parseAndExecuteActions = useCallback(async (
-		cleanContentForDisplay: string, // This is the human-readable text part of the stream
+		cleanContentForDisplay: string,
 		isFinalParse: boolean
 	) => {
 		console.log(`parseAndExecuteActions called - isFinal: ${isFinalParse}, content length: ${cleanContentForDisplay.length}`);
@@ -250,7 +216,6 @@ export const useAIChat = (
 		}
 
 		const state = fileExtractionStateRef.current;
-		// Use fullAccumulatedStreamRef for action parsing, as it contains raw tags
 		const rawStreamForActions = fullAccumulatedStreamRef.current;
 		let searchStartIndexForActions = state.lastScanLength;
 
@@ -264,18 +229,20 @@ export const useAIChat = (
 		const maxIterations = 500; // Safety break
 		let iterations = 0;
 		let filesCreatedOrModified = false;
-		let foundBoltActions = false;
+		let foundBoltFileActions = false;
+		let foundAnyBoltActions = false;
+
 
 		while (iterations++ < maxIterations && searchStartIndexForActions < rawStreamForActions.length) {
 			if (!state.insideAction) {
 				const actionTagOpenIndex = rawStreamForActions.indexOf(BOLT_ACTION_TAG_OPEN, searchStartIndexForActions);
 				if (actionTagOpenIndex === -1) break; // No more actions
 
-				foundBoltActions = true; // We found at least one boltAction tag
+				foundAnyBoltActions = true; // We found at least one boltAction tag
 
 				const tagEndIndex = rawStreamForActions.indexOf('>', actionTagOpenIndex);
 				if (tagEndIndex === -1) { // Incomplete open tag, wait for more data
-					searchStartIndexForActions = actionTagOpenIndex; // So we re-evaluate from here
+					searchStartIndexForActions = actionTagOpenIndex;
 					break;
 				}
 
@@ -294,13 +261,14 @@ export const useAIChat = (
 				state.currentActionStartIndex = tagEndIndex + 1; // Content starts after '>'
 
 				if (actionType === 'file') {
+					foundBoltFileActions = true; // Mark that we found an explicit file action
 					let filePath = extractAttribute(tagFullContent, 'filePath') || '';
 					if (!filePath) { state.insideAction = false; searchStartIndexForActions = tagEndIndex + 1; continue; }
-					
+
 					// Normalize the file path to prevent duplication of WORK_DIR
 					// Remove leading slash if present for normalization
 					let normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-					
+
 					// Check if the path already contains the work directory structure
 					// Both "home/project/..." and "project/..." should be handled
 					if (normalizedPath.startsWith('home/project/')) {
@@ -314,7 +282,7 @@ export const useAIChat = (
 						if (!filePath.startsWith('/')) filePath = '/' + filePath;
 						filePath = WORK_DIR + filePath;
 					}
-					
+
 					state.actionFilePath = filePath;
 					state.accumulatedFileContent = ''; // Reset for new file action
 					if (!state.completedFiles.has(filePath) && !isFinalParse) {
@@ -323,10 +291,10 @@ export const useAIChat = (
 				} else if (actionType === 'directory') {
 					let dirPath = extractAttribute(tagFullContent, 'dirPath') || '';
 					if (!dirPath) { state.insideAction = false; searchStartIndexForActions = tagEndIndex + 1; continue; }
-					
+
 					// Apply the same normalization logic for directories
 					let normalizedPath = dirPath.startsWith('/') ? dirPath.substring(1) : dirPath;
-					
+
 					if (normalizedPath.startsWith('home/project/')) {
 						// Path already has full work dir, just add leading slash
 						dirPath = '/' + normalizedPath;
@@ -386,7 +354,7 @@ export const useAIChat = (
 						state.completedFiles.add(filePath); // Mark as "processed" even though queued
 						if (!isFinalParse) setActiveFile(null);
 					} else if (fileActionsCallbackRef.current) {
-						try { 
+						try {
 							await fileActionsCallbackRef.current(filePath, decodedActionContent);
 							filesCreatedOrModified = true; // Track that files were modified
 						}
@@ -395,11 +363,6 @@ export const useAIChat = (
 						if (!isFinalParse) setActiveFile(null);
 					}
 				} else if ((state.actionType === 'shell' || state.actionType === 'command') && decodedActionContent) {
-					console.log(`🚀 Executing shell/command action: "${decodedActionContent}"`);
-					console.log(`🔧 WebContainer available: ${!!webContainerInstance}`);
-					console.log(`🔧 Terminal callback available: ${!!terminalActionsCallbackRef.current}`);
-					console.log(`🔧 runTerminalCommand available: ${!!runTerminalCommand}`);
-					
 					// Queue command action if WebContainer not ready
 					if (!webContainerInstance) {
 						pendingActionsRef.current.commands.push(decodedActionContent);
@@ -409,11 +372,10 @@ export const useAIChat = (
 					} else if (terminalActionsCallbackRef.current && runTerminalCommand) {
 						console.log(`✅ All conditions met, executing command: "${decodedActionContent}"`);
 						if (!isFinalParse) setActiveCommand(decodedActionContent);
-						try { 
-							await terminalActionsCallbackRef.current(decodedActionContent); 
-							console.log(`✅ Command executed successfully: "${decodedActionContent}"`);
-						} catch (e) { 
-							console.error(`❌ Error executing command "${decodedActionContent}":`, e); 
+						try {
+							await terminalActionsCallbackRef.current(decodedActionContent);
+						} catch (e) {
+							console.error(`❌ Error executing command "${decodedActionContent}":`, e);
 						}
 						finally { if (!isFinalParse) setActiveCommand(null); }
 						state.completedCommands.add(decodedActionContent);
@@ -436,26 +398,85 @@ export const useAIChat = (
 		}
 		state.lastScanLength = searchStartIndexForActions;
 
-		// Fallback: If no boltAction tags were found and this is the final parse, 
-		// look for shell commands in markdown code blocks
-		if (isFinalParse && !foundBoltActions && terminalActionsCallbackRef.current && webContainerInstance) {
-			console.log('🔄 No boltAction tags found, checking for shell commands in markdown code blocks...');
-			
-			// Look for bash/shell code blocks in the clean content
-			const bashCodeBlockRegex = /```(?:bash|sh|shell)\s*\n([\s\S]*?)\n```/g;
+		// Fallback: If no boltAction tags were found and this is the final parse,
+		// look for shell commands OR file content in markdown code blocks.
+		if (isFinalParse && !foundAnyBoltActions) {
+			console.log('🔄 No boltAction tags found, checking for actions in markdown code blocks...');
+
+			const markdownCodeBlockRegex = /^\s*(?:(?:(?:\/\/|\#)\s*([a-zA-Z0-9_\-\\.\\/]+\\.[a-zA-Z0-9_]+)\s*(?:\r\n|\n|\r)\s*)?```)(?:([a-zA-Z0-9_\-\\.]+)\s*(?:\r\n|\n|\r))?([\s\S]*?)(?:\r\n|\n|\r)```/gm;
 			let match;
-			
-			while ((match = bashCodeBlockRegex.exec(cleanContentForDisplay)) !== null) {
-				const command = match[1].trim();
-				if (command && !state.completedCommands.has(command)) {
-					console.log(`🔄 Found shell command in markdown: "${command}"`);
-					
-					try {
-						await terminalActionsCallbackRef.current(command);
-						state.completedCommands.add(command);
-						console.log(`✅ Executed fallback command: "${command}"`);
-					} catch (e) {
-						console.error(`❌ Error executing fallback command "${command}":`, e);
+
+			while ((match = markdownCodeBlockRegex.exec(cleanContentForDisplay)) !== null) {
+				const pathFromCommentBeforeFences = match[1]?.trim();
+				const lang = match[2]?.trim()?.toLowerCase();
+				let blockContent = match[3].trim();
+
+				let actualInferredPath = pathFromCommentBeforeFences;
+				let finalContent = blockContent;
+
+				if (!actualInferredPath && blockContent) {
+					const contentLines = blockContent.split(/\r\n|\n|\r/);
+					if (contentLines.length > 0) {
+						const firstLine = contentLines[0].trim();
+						const pathCommentInContentRegex = /^(?:\/\/|\#)\s*([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9_]+)/;
+						const commentMatchInContent = firstLine.match(pathCommentInContentRegex);
+						if (commentMatchInContent && commentMatchInContent[1]) {
+							actualInferredPath = commentMatchInContent[1].trim();
+							finalContent = contentLines.slice(1).join('\n').trim();
+							console.log(`Extracted path from content's first line: ${actualInferredPath}`);
+						}
+					}
+				}
+
+				if (finalContent) {
+					if ((lang === 'bash' || lang === 'sh' || lang === 'shell' || lang === 'zsh' || lang === 'command') && terminalActionsCallbackRef.current) {
+						if (!state.completedCommands.has(finalContent)) {
+							console.log(`🔄 Found shell command in markdown (lang: ${lang}): \"${finalContent}\"`);
+							if (!webContainerInstance) {
+								pendingActionsRef.current.commands.push(finalContent);
+								console.log(`⏳ Queued fallback command for later: ${finalContent}`);
+								state.completedCommands.add(finalContent);
+							} else {
+								try {
+									await terminalActionsCallbackRef.current(finalContent);
+									state.completedCommands.add(finalContent);
+									console.log(`✅ Executed fallback command: \"${finalContent}\"`);
+								} catch (e) {
+									console.error(`❌ Error executing fallback command \"${finalContent}\":`, e);
+								}
+							}
+						}
+					} else if (actualInferredPath && fileActionsCallbackRef.current) {
+						let filePath = actualInferredPath;
+						let normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+						if (normalizedPath.startsWith('home/project/')) {
+							filePath = '/' + normalizedPath;
+						} else if (normalizedPath.startsWith('project/')) {
+							filePath = '/home/' + normalizedPath;
+						} else {
+							if (!filePath.startsWith('/')) filePath = '/' + filePath;
+							filePath = WORK_DIR + filePath;
+						}
+
+						if (!state.completedFiles.has(filePath)) {
+							console.log(`🔄 Found file content in markdown (path: ${filePath}, lang: ${lang})`);
+							if (!webContainerInstance) {
+								pendingActionsRef.current.files.push({ path: filePath, content: finalContent });
+								console.log(`Queued fallback file action for later: ${filePath}`);
+								state.completedFiles.add(filePath); // Mark as "processed" even though queued
+							} else {
+								try {
+									await fileActionsCallbackRef.current(filePath, finalContent);
+									filesCreatedOrModified = true;
+									state.completedFiles.add(filePath);
+									console.log(`✅ Wrote fallback file: \"${filePath}\"`);
+								} catch (e) {
+									console.error(`❌ Error writing fallback file \"${filePath}\":`, e);
+								}
+							}
+						}
+					} else if (!foundBoltFileActions && !actualInferredPath && lang && !['bash', 'sh', 'shell', 'zsh', 'command'].includes(lang) && fileActionsCallbackRef.current) {
+						console.log(`⚠️ Found code block (lang: ${lang}) in markdown without a clear file path. Content: ${finalContent.substring(0, 100)}...`);
 					}
 				}
 			}
@@ -520,9 +541,9 @@ export const useAIChat = (
 				insideAction: false, actionType: null, actionFilePath: null, currentActionStartIndex: -1,
 				completedCommands: new Set<string>(),
 			};
-			fullAccumulatedStreamRef.current = '';      // Reset raw accumulator
-		} else { // Incremental parse
-			partialResponseForDisplayRef.current = cleanContentForDisplay; // Keep track of clean display
+			fullAccumulatedStreamRef.current = '';
+		} else {
+			partialResponseForDisplayRef.current = cleanContentForDisplay;
 			console.log(`Incremental parse - updating assistant message with partial content (${cleanContentForDisplay.length} chars)`);
 
 			setMessages(prev => {
@@ -586,9 +607,6 @@ export const useAIChat = (
 
 				if (value) {
 					const rawChunk = decoder.decode(value, { stream: true });
-					// Log first few bytes of each chunk (for debugging)
-					console.log(`Received chunk: ${rawChunk.substring(0, 50)}${rawChunk.length > 50 ? '...' : ''}`);
-
 					// Accumulate ALL raw content for action parsing
 					fullAccumulatedStreamRef.current += rawChunk;
 
@@ -597,6 +615,44 @@ export const useAIChat = (
 
 					for (const line of lines) {
 						if (line.trim() === '') continue;
+
+						// Check for error responses (usually line 3: contains error messages)
+						if (line.startsWith('3:')) {
+							try {
+								const errorContent = line.substring(2);
+								console.log(`Error line detected: ${errorContent}`);
+
+								// Parse the error content - it might be JSON or plain text
+								let errorMessage = errorContent;
+								if (errorContent.startsWith('"') && errorContent.endsWith('"')) {
+									try {
+										errorMessage = JSON.parse(errorContent);
+									} catch (e) {
+										errorMessage = errorContent.slice(1, -1); // Remove quotes
+									}
+								}
+
+								// Set the error and stop processing
+								setOpenRouterError(errorMessage);
+								setStreamingComplete(true);
+								setProcessingFiles(false);
+								setIsApiRequestInProgress(false);
+
+								// Update the assistant message with the error
+								setMessages(prev => {
+									const updated = [...prev];
+									if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+										updated[updated.length - 1].content = `Error: ${errorMessage}`;
+									}
+									return updated;
+								});
+
+								return; // Exit the function early
+							} catch (e) {
+								console.warn('Error parsing error line:', e, "Line:", line);
+								// Fall through to treat as regular content
+							}
+						}
 
 						if (line.startsWith('2:[') || line.startsWith('8:[')) { // Progress/Annotations
 							try {
@@ -609,7 +665,7 @@ export const useAIChat = (
 								const textContent = line.substring(2);
 								console.log(`Text content line: ${textContent.substring(0, 30)}...`);
 								let cleanToken = textContent;
-								
+
 								// Handle JSON-encoded strings properly
 								if (textContent.startsWith('"') && textContent.endsWith('"')) {
 									try {
@@ -627,13 +683,13 @@ export const useAIChat = (
 										cleanToken = textContent;
 									}
 								}
-								
+
 								// Don't decode HTML entities here as they should already be properly formatted
 								// Only decode if we detect actual HTML entities (not JSON escape sequences)
 								if (cleanToken.includes('&lt;') || cleanToken.includes('&gt;') || cleanToken.includes('&amp;')) {
 									cleanToken = he.decode(cleanToken);
 								}
-								
+
 								newCleanTextInChunkForDisplay += cleanToken;
 							} catch (e) {
 								// Fallback for any parsing errors
@@ -645,7 +701,6 @@ export const useAIChat = (
 							}
 						} else if (line.startsWith('e:') || line.startsWith('d:')) { // Usage or other data
 							try {
-								console.log(`Data line: ${line.substring(0, 30)}...`);
 								const dataObj = JSON.parse(line.substring(2));
 								if (dataObj.usage) processSpecialContent({ type: 'usage', value: dataObj.usage });
 							} catch (e) { console.warn('Error parsing usage/data line:', e, "Line:", line); }
@@ -654,7 +709,38 @@ export const useAIChat = (
 
 					if (newCleanTextInChunkForDisplay.length > 0) {
 						accumulatedJsonLineBuffer += newCleanTextInChunkForDisplay;
-						console.log(`Accumulated text for display (latest): ${newCleanTextInChunkForDisplay.substring(0, 50)}${newCleanTextInChunkForDisplay.length > 50 ? '...' : ''}`);
+
+						// Check if the accumulated content contains error indicators
+						const errorPatterns = [
+							/Custom error:\s*(.*)/i,
+							/Payment Required/i,
+							/Insufficient credits/i,
+							/API Error/i,
+							/Error:\s*(.*)/i
+						];
+
+						for (const pattern of errorPatterns) {
+							const match = accumulatedJsonLineBuffer.match(pattern);
+							if (match) {
+								const errorMessage = match[1] || match[0];
+								console.log(`Error pattern detected in accumulated content: ${errorMessage}`);
+								setOpenRouterError(errorMessage);
+								setStreamingComplete(true);
+								setProcessingFiles(false);
+								setIsApiRequestInProgress(false);
+
+								// Update the assistant message with the error
+								setMessages(prev => {
+									const updated = [...prev];
+									if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+										updated[updated.length - 1].content = `Error: ${errorMessage}`;
+									}
+									return updated;
+								});
+
+								return; // Exit the function early
+							}
+						}
 					}
 
 					// Incremental parse for actions and update display
@@ -664,6 +750,22 @@ export const useAIChat = (
 			}
 		} catch (error) {
 			console.error('Error processing SSE stream:', error);
+
+			// Set the error state
+			const errorMessage = error instanceof Error ? error.message : String(error);
+			setOpenRouterError(errorMessage);
+
+			// Update the assistant message with the error if no content was received
+			if (accumulatedJsonLineBuffer.trim() === '') {
+				setMessages(prev => {
+					const updated = [...prev];
+					if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
+						updated[updated.length - 1].content = `Error: ${errorMessage}`;
+					}
+					return updated;
+				});
+			}
+
 			// Attempt final parse even on error to salvage what we can
 			await parseAndExecuteActions(accumulatedJsonLineBuffer, true);
 		} finally {
@@ -732,37 +834,26 @@ export const useAIChat = (
 			if (cachedMessages) {
 				try {
 					const parsedMessages = JSON.parse(cachedMessages);
-					console.log('DEBUG: Checking cached messages:', parsedMessages.length, 'messages');
-					console.log('DEBUG: Looking for message:', newMessageContent.trim());
-					
+
 					// Check if the requested message is already in our cached messages
 					if (Array.isArray(parsedMessages) &&
 						parsedMessages.some(m => m.role === 'user' && getTextContent(m.content) === newMessageContent.trim())) {
-						console.log("DEBUG: Detected page refresh with existing message. Not sending duplicate to LLM.");
 
 						// Instead of calling the API, try to find the corresponding assistant response in cache
 						const userMessageIndex = parsedMessages.findIndex(m =>
 							m.role === 'user' && getTextContent(m.content) === newMessageContent.trim());
 
-						console.log('DEBUG: User message index:', userMessageIndex);
 						if (userMessageIndex >= 0 && userMessageIndex < parsedMessages.length - 1 &&
 							parsedMessages[userMessageIndex + 1].role === 'assistant') {
-							console.log('DEBUG: Found cached assistant response, using it');
 							// Set the messages from cache
 							setMessages(parsedMessages.slice(0, userMessageIndex + 2));
 							return false;
-						} else {
-							console.log('DEBUG: No cached assistant response found, proceeding with API call');
 						}
-					} else {
-						console.log('DEBUG: Message not found in cache, proceeding with API call');
 					}
 				} catch (e) {
 					console.warn("Error parsing cached messages:", e);
 					// Continue with normal processing if there's an error
 				}
-			} else {
-				console.log('DEBUG: No cached messages found');
 			}
 		}
 
@@ -777,18 +868,13 @@ export const useAIChat = (
 			return false;
 		}
 
-		console.log(`sendMessageToAI: Processing message: "${newMessageContent.substring(0, 50)}..."`);
-
 		// Setup for the message (sets flags, clears state)
 		commonSendMessageSetup();
 
-		const currentRequestId = lastRequestIdRef.current;
-
 		// Create the user message content based on whether we have images
 		let userMessageContent: AIChatMessage['content'];
-		
+
 		if (images && images.length > 0) {
-			// Create array format for mixed content
 			userMessageContent = [
 				{
 					type: 'text',
@@ -797,12 +883,11 @@ export const useAIChat = (
 				...images.map(image => ({
 					type: 'image_url' as const,
 					image_url: {
-						url: image.signUrl || image.url // Use signUrl for API if available, fallback to url
+						url: image.signUrl || image.url
 					}
 				}))
 			];
 		} else {
-			// Simple string content
 			userMessageContent = newMessageContent;
 		}
 
@@ -821,7 +906,7 @@ export const useAIChat = (
 			if (prev[prev.length - 1].role === 'user') {
 				const lastUserContent = getTextContent(prev[prev.length - 1].content);
 				const newUserContent = getTextContent(userMessageContent);
-				
+
 				if (lastUserContent === newUserContent) {
 					console.log("Found duplicate user message, just adding assistant shell");
 					return [...prev, emptyAssistantMessage]; // Just add the assistant message
@@ -830,11 +915,8 @@ export const useAIChat = (
 
 			// Regular case - add both user message and assistant shell
 			const updatedMessages = [...prev, newUserMessage, emptyAssistantMessage];
-			console.log(`Messages updated: now ${updatedMessages.length} messages (added user + empty assistant)`);
 			return updatedMessages;
 		});
-
-		// Save conversation to localStorage for refresh detection    try {      if (conversationId) {        const updatedMessages = [...messages, newUserMessage];        localStorage.setItem(`conversation_${conversationId}`, JSON.stringify(updatedMessages));      }    } catch (e) {      console.warn("Error saving conversation to localStorage:", e);    }        // Save new user message to DB - only once per request    if (conversationId) {      try {        console.log(`Saving user message to conversation ID: ${conversationId}`);        await fetch(`/api/conversations/${conversationId}/messages`, {          method: 'POST',          headers: { 'Content-Type': 'application/json' },          body: JSON.stringify({ role: 'user', content: newUserMessage.content }),        });      } catch (error) {        console.error("Failed to save user message to DB:", error);      }    }
 
 		try {
 			let currentWCFiles: Record<string, any> = {};
@@ -963,10 +1045,6 @@ export const useAIChat = (
 				}
 			}
 
-			// Log file count for debugging
-			console.log(`Prepared ${Object.keys(currentWCFiles).length} files for context`);
-
-			// Use the current `messages` state plus the new user message
 			// Make a copy to avoid including the assistant message shell we added
 			const messagesForPayload = [...messages].filter(m => m.role !== 'assistant' || getTextContent(m.content).trim() !== '');
 			// Add the new user message if it's not already included
@@ -985,9 +1063,6 @@ export const useAIChat = (
 				conversationId: conversationId,
 				selectedModel: selectedModel
 			};
-
-			console.log('Sending chat request with file count:', Object.keys(currentWCFiles).length);
-			console.log('API payload message count:', formattedMessages.length);
 
 			const response = await fetch('/api/chat', {
 				method: 'POST',
@@ -1031,22 +1106,21 @@ export const useAIChat = (
 
 	const sendCurrentMessagesToLLM = useCallback(async () => {
 		if (isApiRequestInProgress) { console.warn("sendCurrentMessagesToLLM: API request already in progress."); return false; }
-		
+
 		// Use initialMessagesProp as fallback if messages state hasn't been updated yet
 		const messagesToUse = messages.length > 0 ? messages : (initialMessagesProp || []);
-		
+
 		if (messagesToUse.length === 0) { console.warn("sendCurrentMessagesToLLM: No messages available"); return false; }
-		
+
 		// Convert initialMessagesProp to AIChatMessage format if using it
 		const formattedMessagesToUse = messagesToUse.length > 0 && messagesToUse[0].role
 			? messagesToUse.map(m => ({ role: m.role, content: m.content }))
 			: messagesToUse;
-			
-		if (formattedMessagesToUse[formattedMessagesToUse.length - 1].role !== 'user') { 
-			console.warn("sendCurrentMessagesToLLM: Last message not from user."); 
-			return false; 
+
+		if (formattedMessagesToUse[formattedMessagesToUse.length - 1].role !== 'user') {
+			console.warn("sendCurrentMessagesToLLM: Last message not from user.");
+			return false;
 		}
-		// Removed WebContainer check to allow operation without it
 
 		// Check if this is a page refresh with an existing conversation
 		if (conversationId && formattedMessagesToUse.length >= 2) {
@@ -1061,7 +1135,6 @@ export const useAIChat = (
 						lastUserMessage &&
 						parsedMessages.some(m => m.role === 'user' && getTextContent(m.content) === getTextContent(lastUserMessage.content))) {
 
-						console.log("Detected page refresh with existing conversation. Not sending duplicate message to LLM.");
 						return false;
 					}
 				} catch (e) {
@@ -1303,8 +1376,6 @@ export const useAIChat = (
 		setIsApiRequestInProgress(false);
 		setActiveFile(null);
 		setActiveCommand(null);
-		// If you have an AbortController associated with the fetch, call abort() here.
-		// e.g., abortControllerRef.current?.abort();
 	}, []);
 
 	// Add this before the return statement in useAIChat

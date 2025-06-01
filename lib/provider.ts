@@ -16,7 +16,6 @@ interface OpenRouterModelsResponse {
   data: OpenRouterModel[];
 }
 
-// Simple abstract BaseProvider class implementation
 export abstract class BaseProvider {
   abstract name: string;
   abstract getApiKeyLink: string;
@@ -126,13 +125,13 @@ export default class OpenRouterProvider extends BaseProvider {
     apiKeys?: Record<string, string>;
     providerSettings?: Record<string, IProviderSetting>;
   }): LanguageModelV1 {
-    const { model } = options;
+    const { model, apiKeys } = options;
 
-    // Get API key directly from process.env
-    const apiKey = process.env[this.config.apiTokenKey];
+    let apiKey = apiKeys?.["OpenRouter"] || process.env[this.config.apiTokenKey];
+
 
     if (!apiKey) {
-      throw new Error(`Missing API key for ${this.name} provider. Please set ${this.config.apiTokenKey} in your .env.local file.`);
+      throw new Error(`Missing API key for ${this.name} provider. Please set ${this.config.apiTokenKey} in your .env.local file or ensure it's configured for your account.`);
     }
 
     const openRouter = createOpenRouter({

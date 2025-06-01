@@ -280,7 +280,7 @@ const safePrepareBoltContentForStreaming = (content: string, isStreaming: boolea
   // During streaming, only process complete bolt tags to avoid corruption
   // Check if content ends with an incomplete tag
   const hasIncompleteTag = cleanedContent.includes('<boltA') && !cleanedContent.includes('</boltAction>');
-  
+
   if (hasIncompleteTag) {
     // Don't process any bolt tags if we have incomplete ones
     return cleanedContent;
@@ -289,7 +289,7 @@ const safePrepareBoltContentForStreaming = (content: string, isStreaming: boolea
   // Only process complete bolt actions during streaming
   const completeActionRegex = /<boltAction\s+type="file"\s+filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g;
   let processedContent = cleanedContent;
-  
+
   // Only replace if we have complete matches
   const matches = [...cleanedContent.matchAll(completeActionRegex)];
   if (matches.length > 0) {
@@ -314,7 +314,7 @@ const safePrepareBoltContentForStreaming = (content: string, isStreaming: boolea
 const prepareBoltContentForDisplay = (content: string) => {
   // First, clean up conflicting markdown code blocks that the LLM sometimes adds around bolt artifacts
   let cleanedContent = content;
-  
+
   // Remove markdown code blocks that wrap bolt artifacts (this causes conflicts)
   // Pattern: ```\n\n...bolt artifacts...```
   if (cleanedContent.includes('<boltArtifact') || cleanedContent.includes('<boltAction')) {
@@ -399,15 +399,11 @@ export const Markdown = memo(({
 }: MarkdownProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Save raw content in a ref for debugging
   const rawContentRef = useRef<string>(content);
   useEffect(() => {
     if (content !== rawContentRef.current) {
       rawContentRef.current = content;
-
-      // Check for boltAction tags
       if (content.includes('<boltAction')) {
-        console.log('[Markdown] Found boltAction tags in content, dispatching event');
 
         // Dispatch custom event
         const event = new CustomEvent('boltActionsDetected', {
@@ -422,7 +418,6 @@ export const Markdown = memo(({
             content,
             timestamp: Date.now()
           }, '*');
-          console.log('[Markdown] Posted boltAction message to parent window');
         } catch (err) {
           console.error('[Markdown] Error posting message:', err);
         }
@@ -430,35 +425,20 @@ export const Markdown = memo(({
     }
   }, [content]);
 
-  // Improved preprocessing for bolt content
   const processContent = (content: string) => {
-    // Debug logging
     const hasBoltActionTags = content.includes('<boltAction');
-    const hasBoltArtifactTags = content.includes('<boltArtifact');
-    console.log(`[Markdown] Processing content with bolt tags - Actions: ${hasBoltActionTags}, Artifacts: ${hasBoltArtifactTags}`);
 
     // Extract artifact title before we filter out the boltArtifact tags
     const artifactTitleMatch = content.match(/<boltArtifact\s+title="([^"]+)"[^>]*>/);
     const artifactTitle = artifactTitleMatch ? artifactTitleMatch[1] : null;
 
-    if (artifactTitle) {
-      console.log(`[Markdown] Found artifact title: "${artifactTitle}"`);
-    }
-
-    // IMPORTANT CHANGE: Don't filter out boltArtifact and boltAction tags
-    // This was removing the valuable code content from final display
-    // Instead, just clean up and prepare the content for proper display
-    let cleanedContent = content
-      // Just trim whitespace but preserve the actual bolt tags and content
-      .trim();
+    let cleanedContent = content.trim();
 
     return { artifactTitle, cleanedContent, hasBoltActionTags };
   };
 
   const { artifactTitle, cleanedContent, hasBoltActionTags } = processContent(content);
 
-  // NEW: Process bolt tags into markdown code blocks safely
-  // Use the safe processing function that handles both streaming and non-streaming states
   const displayContent = safePrepareBoltContentForStreaming(cleanedContent, isStreaming || false);
 
   return (
@@ -480,7 +460,6 @@ export const Markdown = memo(({
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
-            // The key here is to individually define each component without the inline property issue
             code: ({ className, children, ...rest }) => {
               const codeStr = String(children).replace(/\n$/, '');
 
@@ -508,7 +487,6 @@ export const Markdown = memo(({
             },
 
             p: ({ children, ...rest }) => {
-              // Check if paragraph has actual content
               const textContent = React.Children.toArray(children)
                 .map(child => typeof child === 'string' ? child : '')
                 .join('')

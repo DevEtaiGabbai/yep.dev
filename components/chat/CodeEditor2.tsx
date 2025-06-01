@@ -1,8 +1,7 @@
-// app/components/chat/CodeEditor2.tsx
 'use client';
 
 import Editor, { OnMount } from '@monaco-editor/react';
-import * as monaco from 'monaco-editor'; // Keep this for types
+import * as monaco from 'monaco-editor';
 import { useEffect, useRef, useState } from 'react';
 
 interface CodeEditorProps {
@@ -23,440 +22,194 @@ export default function CodeEditor2({ value, onChange, language }: CodeEditorPro
 
         // Configure TypeScript compiler options to resolve React type errors
         monacoInstance.languages.typescript.typescriptDefaults.setCompilerOptions({
-            jsx: monacoInstance.languages.typescript.JsxEmit.React,
+            jsx: monacoInstance.languages.typescript.JsxEmit.ReactJSX,
             jsxImportSource: 'react',
-            allowNonTsExtensions: true,
             esModuleInterop: true,
             allowSyntheticDefaultImports: true,
             moduleResolution: monacoInstance.languages.typescript.ModuleResolutionKind.NodeJs,
+            module: monacoInstance.languages.typescript.ModuleKind.ESNext,
             target: monacoInstance.languages.typescript.ScriptTarget.ES2020,
             lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+            resolveJsonModule: true,
+            noEmit: true,
+            allowJs: true,
+            skipLibCheck: true,
         });
 
         // Configure JavaScript compiler options as well
         monacoInstance.languages.typescript.javascriptDefaults.setCompilerOptions({
-            jsx: monacoInstance.languages.typescript.JsxEmit.React,
+            jsx: monacoInstance.languages.typescript.JsxEmit.ReactJSX,
             jsxImportSource: 'react',
-            allowNonTsExtensions: true,
             esModuleInterop: true,
             allowSyntheticDefaultImports: true,
             moduleResolution: monacoInstance.languages.typescript.ModuleResolutionKind.NodeJs,
+            module: monacoInstance.languages.typescript.ModuleKind.ESNext,
             target: monacoInstance.languages.typescript.ScriptTarget.ES2020,
             lib: ['ES2020', 'DOM', 'DOM.Iterable'],
+            resolveJsonModule: true,
+            noEmit: true,
+            allowJs: true,
+            skipLibCheck: true,
         });
 
-        // Disable strict type checking to reduce noise
+        // Minimal list of diagnostic codes to ignore - aim for zero if possible.
+        const diagnosticCodesToIgnore = [
+            // 7016, // Could not find declaration file for module 'X'. (If stubs are not perfect)
+            // 2339, // Property 'X' does not exist on type '{}'. (Often for 'any' types)
+        ];
+
         monacoInstance.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
-            noSemanticValidation: false, // Enable semantic validation but configure it
-            noSyntaxValidation: false,   // Enable syntax validation
-            diagnosticCodesToIgnore: [
-                1108, // Return statement in function
-                1005, // Expected token
-                1002, // Unterminated string literal
-                1003, // Identifier expected
-                1009, // Trailing comma
-                2792, // Cannot find module (this is the main error you're seeing)
-                2304, // Cannot find name
-                2307, // Cannot find module
-                2339, // Property 'map' does not exist on type '{}'
-                2365, // Operator '>' cannot be applied to types
-                2635, // Type '{}' has no signatures for which the type argument list is applicable
-                7016, // Could not find declaration file
-                7027, // Unreachable code detected
-                7053, // Element implicitly has an 'any' type
-                2571, // Object is of type 'unknown'
-                2322, // Type is not assignable to type
-                2345, // Argument of type is not assignable to parameter of type
-                2531, // Object is possibly 'null'
-                2532, // Object is possibly 'undefined'
-                18048, // Element implicitly has an 'any' type because expression of type can't be used to index type
-            ]
+            noSemanticValidation: false,
+            noSyntaxValidation: false,
+            diagnosticCodesToIgnore: diagnosticCodesToIgnore
         });
 
-        // Also configure JavaScript diagnostics
         monacoInstance.languages.typescript.javascriptDefaults.setDiagnosticsOptions({
             noSemanticValidation: false,
             noSyntaxValidation: false,
-            diagnosticCodesToIgnore: [
-                1108, 1005, 1002, 1003, 1009, 2792, 2304, 2307, 2339, 2365, 2635, 7016, 7027, 7053, 2571, 2322, 2345, 2531, 2532, 18048
-            ]
+            diagnosticCodesToIgnore: diagnosticCodesToIgnore
         });
 
-        // Add comprehensive type definitions
-        const comprehensiveTypes = `
+        // --- Minimal React type definitions ---
+        const minimalReactDTS = `
 declare module 'react' {
-    export interface HTMLAttributes<T> {
+    type Key = string | number;
+    type Ref<T> = string | { current: T | null } | ((instance: T | null) => void);
+    type ReactNode = ReactElement | string | number | ReactFragment | ReactPortal | boolean | null | undefined;
+    interface Attributes { key?: Key; }
+    interface ClassAttributes<T> extends Attributes { ref?: Ref<T>; }
+    interface ReactElement<P = any, T extends string | JSXElementConstructor<any> = string | JSXElementConstructor<any>> {
+        type: T;
+        props: P;
+        key: Key | null;
+    }
+    type ReactFragment = Iterable<ReactNode>;
+    type ReactPortal = ReactElement & { children: ReactNode };
+    type JSXElementConstructor<P> = ((props: P) => ReactElement<any, any> | null) | (new (props: P) => Component<P, any>);
+
+    export function useState<S>(initialState: S | (() => S)): [S, (newState: S | ((prevState: S) => S)) => void];
+    export function useEffect(effect: () => void | (() => void), deps?: ReadonlyArray<any>): void;
+    export function useContext<T>(context: Context<T>): T;
+    export function useReducer<R extends Reducer<any, any>, I>(reducer: R, initializerArg: I, initializer?: (arg: I) => ReducerState<R>): [ReducerState<R>, Dispatch<ReducerAction<R>>];
+    export function useCallback<T extends (...args: any[]) => any>(callback: T, deps: ReadonlyArray<any>): T;
+    export function useMemo<T>(factory: () => T, deps: ReadonlyArray<any> | undefined): T;
+    export function useRef<T>(initialValue: T): { current: T };
+
+    export const StrictMode: ({ children?: ReactNode }) => ReactElement;
+    export const Fragment: ({ children?: ReactNode }) => ReactElement;
+
+    interface Context<T> { Provider: Provider<T>; Consumer: Consumer<T>; displayName?: string; }
+    interface Provider<T> { ({ value, children }: { value: T; children?: ReactNode; }): ReactElement; }
+    interface Consumer<T> { ({ children }: { children: (value: T) => ReactNode; }): ReactElement; }
+    export function createContext<T>(defaultValue: T): Context<T>;
+
+    class Component<P = {}, S = {}> { constructor(props: Readonly<P>); setState<K extends keyof S>(state: ((prevState: Readonly<S>, props: Readonly<P>) => (Pick<S, K> | S | null)) | (Pick<S, K> | S | null), callback?: () => void): void; forceUpdate(callback?: () => void): void; render(): ReactNode; readonly props: Readonly<P>; state: Readonly<S>; }
+    type Reducer<S, A> = (prevState: S, action: A) => S;
+    type ReducerState<R extends Reducer<any, any>> = R extends Reducer<infer S, any> ? S : never;
+    type ReducerAction<R extends Reducer<any, any>> = R extends Reducer<any, infer A> ? A : never;
+    type Dispatch<A> = (value: A) => void;
+
+    export function createElement<P extends {}>(type: string | JSXElementConstructor<P>, props?: Attributes & P | null, ...children: ReactNode[]): ReactElement<P>;
+
+    const React: {
+        useState: typeof useState;
+        useEffect: typeof useEffect;
+        useContext: typeof useContext;
+        useReducer: typeof useReducer;
+        useCallback: typeof useCallback;
+        useMemo: typeof useMemo;
+        useRef: typeof useRef;
+        StrictMode: typeof StrictMode;
+        Fragment: typeof Fragment;
+        createContext: typeof createContext;
+        createElement: typeof createElement;
+    };
+    export default React;
+
+    // React specific HTML attributes
+    interface HTMLAttributes<T> extends AriaAttributes, DOMAttributes<T> {
+        defaultChecked?: boolean;
+        defaultValue?: string | ReadonlyArray<string> | number;
+        suppressContentEditableWarning?: boolean;
+        suppressHydrationWarning?: boolean;
+        accessKey?: string;
         className?: string;
-        style?: React.CSSProperties;
-        onClick?: (event: React.MouseEvent<T>) => void;
-        onChange?: (event: React.ChangeEvent<T>) => void;
-        onSubmit?: (event: React.FormEvent<T>) => void;
-        children?: React.ReactNode;
+        contentEditable?: "inherit" | (boolean | "true" | "false");
+        style?: CSSProperties;
+        children?: ReactNode;
         [key: string]: any;
     }
-    
-    export interface CSSProperties {
-        [key: string]: string | number | undefined;
-    }
-    
-    export type ReactNode = string | number | boolean | React.ReactElement | React.ReactFragment | React.ReactPortal | null | undefined;
-    export type ReactElement = any;
-    export type ReactFragment = any;
-    export type ReactPortal = any;
-    export type MouseEvent<T = Element> = any;
-    export type ChangeEvent<T = Element> = any;
-    export type FormEvent<T = Element> = any;
-    
-    export function createElement(type: any, props?: any, ...children: any[]): ReactElement;
-    export function useState<T>(initialState: T | (() => T)): [T, (value: T | ((prev: T) => T)) => void];
-    export function useEffect(effect: () => void | (() => void), deps?: any[]): void;
-    export function useCallback<T extends (...args: any[]) => any>(callback: T, deps: any[]): T;
-    export function useMemo<T>(factory: () => T, deps: any[]): T;
-    export function useRef<T>(initialValue: T): { current: T };
-    export function useContext<T>(context: any): T;
-    
-    export const Fragment: any;
-    export default React;
+    type DetailedHTMLProps<E extends HTMLAttributes<T>, T> = ClassAttributes<T> & E;
+    interface CSSProperties { [key: string]: string | number | undefined; }
+    interface DOMAttributes<T> { children?: ReactNode; dangerouslySetInnerHTML?: { __html: string; }; /* Add other event handlers if needed */ }
+    interface AriaAttributes { /* Basic Aria attributes */ role?: string; 'aria-label'?: string; [key: \`aria-\${string}\`]: string | boolean | number | undefined; }
+    interface AnchorHTMLAttributes<T> extends HTMLAttributes<T> { href?: string; target?: string; download?: any; rel?: string; }
+    interface ImgHTMLAttributes<T> extends HTMLAttributes<T> { src?: string; alt?: string; }
+    interface ButtonHTMLAttributes<T> extends HTMLAttributes<T> { type?: 'submit' | 'reset' | 'button'; }
+    // Add more specific element attributes if needed
 }
 
-// Add comprehensive built-in types
+// Augment JSX namespace globally
 declare global {
-    interface Array<T> {
-        map<U>(callbackfn: (value: T, index: number, array: T[]) => U, thisArg?: any): U[];
-        filter(predicate: (value: T, index: number, array: T[]) => any, thisArg?: any): T[];
-        forEach(callbackfn: (value: T, index: number, array: T[]) => void, thisArg?: any): void;
-        find(predicate: (value: T, index: number, obj: T[]) => any, thisArg?: any): T | undefined;
-        findIndex(predicate: (value: T, index: number, obj: T[]) => any, thisArg?: any): number;
-        reduce<U>(callbackfn: (previousValue: U, currentValue: T, currentIndex: number, array: T[]) => U, initialValue: U): U;
-        some(predicate: (value: T, index: number, array: T[]) => any, thisArg?: any): boolean;
-        every(predicate: (value: T, index: number, array: T[]) => any, thisArg?: any): boolean;
-        includes(searchElement: T, fromIndex?: number): boolean;
-        indexOf(searchElement: T, fromIndex?: number): number;
-        join(separator?: string): string;
-        slice(start?: number, end?: number): T[];
-        splice(start: number, deleteCount?: number, ...items: T[]): T[];
-        push(...items: T[]): number;
-        pop(): T | undefined;
-        shift(): T | undefined;
-        unshift(...items: T[]): number;
-        reverse(): T[];
-        sort(compareFn?: (a: T, b: T) => number): T[];
-        length: number;
-        [n: number]: T;
-    }
-
-    interface Object {
-        [key: string]: any;
-    }
-
-    interface String {
-        length: number;
-        charAt(pos: number): string;
-        charCodeAt(index: number): number;
-        concat(...strings: string[]): string;
-        indexOf(searchString: string, position?: number): number;
-        lastIndexOf(searchString: string, position?: number): number;
-        localeCompare(that: string): number;
-        match(regexp: string | RegExp): RegExpMatchArray | null;
-        replace(searchValue: string | RegExp, replaceValue: string): string;
-        search(regexp: string | RegExp): number;
-        slice(start?: number, end?: number): string;
-        split(separator?: string | RegExp, limit?: number): string[];
-        substring(start: number, end?: number): string;
-        toLowerCase(): string;
-        toLocaleLowerCase(): string;
-        toUpperCase(): string;
-        toLocaleUpperCase(): string;
-        trim(): string;
-        substr(from: number, length?: number): string;
-        valueOf(): string;
-        [index: number]: string;
-    }
-
-    interface Number {
-        toString(radix?: number): string;
-        toFixed(fractionDigits?: number): string;
-        toExponential(fractionDigits?: number): string;
-        toPrecision(precision?: number): string;
-        valueOf(): number;
-    }
-
-    interface Boolean {
-        valueOf(): boolean;
-    }
-
-    interface RegExp {
-        exec(string: string): RegExpExecArray | null;
-        test(string: string): boolean;
-        source: string;
-        global: boolean;
-        ignoreCase: boolean;
-        multiline: boolean;
-        lastIndex: number;
-        compile(): RegExp;
-    }
-
-    interface Date {
-        toString(): string;
-        toDateString(): string;
-        toTimeString(): string;
-        toLocaleString(): string;
-        toLocaleDateString(): string;
-        toLocaleTimeString(): string;
-        valueOf(): number;
-        getTime(): number;
-        getFullYear(): number;
-        getUTCFullYear(): number;
-        getMonth(): number;
-        getUTCMonth(): number;
-        getDate(): number;
-        getUTCDate(): number;
-        getDay(): number;
-        getUTCDay(): number;
-        getHours(): number;
-        getUTCHours(): number;
-        getMinutes(): number;
-        getUTCMinutes(): number;
-        getSeconds(): number;
-        getUTCSeconds(): number;
-        getMilliseconds(): number;
-        getUTCMilliseconds(): number;
-        getTimezoneOffset(): number;
-        setTime(time: number): number;
-        setMilliseconds(ms: number): number;
-        setUTCMilliseconds(ms: number): number;
-        setSeconds(sec: number, ms?: number): number;
-        setUTCSeconds(sec: number, ms?: number): number;
-        setMinutes(min: number, sec?: number, ms?: number): number;
-        setUTCMinutes(min: number, sec?: number, ms?: number): number;
-        setHours(hours: number, min?: number, sec?: number, ms?: number): number;
-        setUTCHours(hours: number, min?: number, sec?: number, ms?: number): number;
-        setDate(date: number): number;
-        setUTCDate(date: number): number;
-        setMonth(month: number, date?: number): number;
-        setUTCMonth(month: number, date?: number): number;
-        setFullYear(year: number, month?: number, date?: number): number;
-        setUTCFullYear(year: number, month?: number, date?: number): number;
-        toUTCString(): string;
-        toISOString(): string;
-        toJSON(key?: any): string;
-    }
-
     namespace JSX {
+        interface Element extends React.ReactElement<any, any> { }
+        interface ElementClass extends React.Component<any> { render(): React.ReactNode; }
+        interface ElementAttributesProperty { props: {}; }
+        interface ElementChildrenAttribute { children: React.ReactNode | React.ReactNode[]; }
+        interface IntrinsicAttributes extends React.Attributes {}
+        interface IntrinsicClassAttributes<T> extends React.ClassAttributes<T> {}
         interface IntrinsicElements {
-            div: React.HTMLAttributes<HTMLDivElement>;
-            span: React.HTMLAttributes<HTMLSpanElement>;
-            p: React.HTMLAttributes<HTMLParagraphElement>;
-            h1: React.HTMLAttributes<HTMLHeadingElement>;
-            h2: React.HTMLAttributes<HTMLHeadingElement>;
-            h3: React.HTMLAttributes<HTMLHeadingElement>;
-            h4: React.HTMLAttributes<HTMLHeadingElement>;
-            h5: React.HTMLAttributes<HTMLHeadingElement>;
-            h6: React.HTMLAttributes<HTMLHeadingElement>;
-            button: React.HTMLAttributes<HTMLButtonElement>;
-            input: React.HTMLAttributes<HTMLInputElement>;
-            form: React.HTMLAttributes<HTMLFormElement>;
-            img: React.HTMLAttributes<HTMLImageElement>;
-            a: React.HTMLAttributes<HTMLAnchorElement>;
-            ul: React.HTMLAttributes<HTMLUListElement>;
-            ol: React.HTMLAttributes<HTMLOListElement>;
-            li: React.HTMLAttributes<HTMLLIElement>;
-            nav: React.HTMLAttributes<HTMLElement>;
-            header: React.HTMLAttributes<HTMLElement>;
-            footer: React.HTMLAttributes<HTMLElement>;
-            main: React.HTMLAttributes<HTMLElement>;
-            section: React.HTMLAttributes<HTMLElement>;
-            article: React.HTMLAttributes<HTMLElement>;
-            aside: React.HTMLAttributes<HTMLElement>;
-            table: React.HTMLAttributes<HTMLTableElement>;
-            thead: React.HTMLAttributes<HTMLTableSectionElement>;
-            tbody: React.HTMLAttributes<HTMLTableSectionElement>;
-            tr: React.HTMLAttributes<HTMLTableRowElement>;
-            td: React.HTMLAttributes<HTMLTableDataCellElement>;
-            th: React.HTMLAttributes<HTMLTableHeaderCellElement>;
-            [elemName: string]: any;
+            a: React.DetailedHTMLProps<React.AnchorHTMLAttributes<HTMLAnchorElement>, HTMLAnchorElement>;
+            img: React.DetailedHTMLProps<React.ImgHTMLAttributes<HTMLImageElement>, HTMLImageElement>;
+            div: React.DetailedHTMLProps<React.HTMLAttributes<HTMLDivElement>, HTMLDivElement>;
+            span: React.DetailedHTMLProps<React.HTMLAttributes<HTMLSpanElement>, HTMLSpanElement>;
+            p: React.DetailedHTMLProps<React.HTMLAttributes<HTMLParagraphElement>, HTMLParagraphElement>;
+            button: React.DetailedHTMLProps<React.ButtonHTMLAttributes<HTMLButtonElement>, HTMLButtonElement>;
+            // Add more common HTML elements here as needed
+            [elemName: string]: React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>; // Fallback
         }
-    }
-
-    // Add console for debugging
-    declare var console: {
-        log(...args: any[]): void;
-        error(...args: any[]): void;
-        warn(...args: any[]): void;
-        info(...args: any[]): void;
-        debug(...args: any[]): void;
-        trace(...args: any[]): void;
-        assert(condition?: boolean, ...data: any[]): void;
-        clear(): void;
-        count(label?: string): void;
-        countReset(label?: string): void;
-        dir(item?: any, options?: any): void;
-        dirxml(...data: any[]): void;
-        group(...data: any[]): void;
-        groupCollapsed(...data: any[]): void;
-        groupEnd(): void;
-        table(tabularData?: any, properties?: string[]): void;
-        time(label?: string): void;
-        timeEnd(label?: string): void;
-        timeLog(label?: string, ...data: any[]): void;
-        timeStamp(label?: string): void;
-    };
-
-    // Add JSON
-    declare var JSON: {
-        parse(text: string, reviver?: (this: any, key: string, value: any) => any): any;
-        stringify(value: any, replacer?: (this: any, key: string, value: any) => any, space?: string | number): string;
-        stringify(value: any, replacer?: (number | string)[] | null, space?: string | number): string;
-    };
-
-    // Add Math
-    declare var Math: {
-        E: number;
-        LN10: number;
-        LN2: number;
-        LOG10E: number;
-        LOG2E: number;
-        PI: number;
-        SQRT1_2: number;
-        SQRT2: number;
-        abs(x: number): number;
-        acos(x: number): number;
-        asin(x: number): number;
-        atan(x: number): number;
-        atan2(y: number, x: number): number;
-        ceil(x: number): number;
-        cos(x: number): number;
-        exp(x: number): number;
-        floor(x: number): number;
-        log(x: number): number;
-        max(...values: number[]): number;
-        min(...values: number[]): number;
-        pow(x: number, y: number): number;
-        random(): number;
-        round(x: number): number;
-        sin(x: number): number;
-        sqrt(x: number): number;
-        tan(x: number): number;
-    };
-
-    // Add basic DOM types
-    interface Element {
-        tagName: string;
-        className: string;
-        id: string;
-        innerHTML: string;
-        textContent: string | null;
-        getAttribute(name: string): string | null;
-        setAttribute(name: string, value: string): void;
-        removeAttribute(name: string): void;
-        addEventListener(type: string, listener: EventListener, options?: boolean | AddEventListenerOptions): void;
-        removeEventListener(type: string, listener: EventListener, options?: boolean | EventListenerOptions): void;
-        querySelector(selectors: string): Element | null;
-        querySelectorAll(selectors: string): NodeList;
-        appendChild(newChild: Node): Node;
-        removeChild(oldChild: Node): Node;
-        insertBefore(newChild: Node, refChild: Node | null): Node;
-        cloneNode(deep?: boolean): Node;
-        [key: string]: any;
-    }
-
-    interface Document {
-        createElement(tagName: string): Element;
-        getElementById(elementId: string): Element | null;
-        querySelector(selectors: string): Element | null;
-        querySelectorAll(selectors: string): NodeList;
-        body: Element;
-        head: Element;
-        title: string;
-        [key: string]: any;
-    }
-
-    interface Window {
-        document: Document;
-        console: typeof console;
-        JSON: typeof JSON;
-        Math: typeof Math;
-        setTimeout(handler: TimerHandler, timeout?: number, ...arguments: any[]): number;
-        clearTimeout(handle?: number): void;
-        setInterval(handler: TimerHandler, timeout?: number, ...arguments: any[]): number;
-        clearInterval(handle?: number): void;
-        alert(message?: any): void;
-        confirm(message?: string): boolean;
-        prompt(message?: string, defaultText?: string): string | null;
-        [key: string]: any;
-    }
-
-    declare var window: Window;
-    declare var document: Document;
-
-    // Add basic event types
-    interface Event {
-        type: string;
-        target: EventTarget | null;
-        currentTarget: EventTarget | null;
-        preventDefault(): void;
-        stopPropagation(): void;
-        [key: string]: any;
-    }
-
-    interface EventTarget {
-        addEventListener(type: string, listener: EventListener | null, options?: boolean | AddEventListenerOptions): void;
-        removeEventListener(type: string, listener: EventListener | null, options?: boolean | EventListenerOptions): void;
-        dispatchEvent(event: Event): boolean;
-    }
-
-    interface EventListener {
-        (evt: Event): void;
-    }
-
-    interface AddEventListenerOptions {
-        capture?: boolean;
-        once?: boolean;
-        passive?: boolean;
-    }
-
-    interface EventListenerOptions {
-        capture?: boolean;
-    }
-
-    type TimerHandler = string | Function;
-
-    interface Node {
-        nodeType: number;
-        nodeName: string;
-        nodeValue: string | null;
-        parentNode: Node | null;
-        childNodes: NodeList;
-        firstChild: Node | null;
-        lastChild: Node | null;
-        previousSibling: Node | null;
-        nextSibling: Node | null;
-        appendChild(newChild: Node): Node;
-        removeChild(oldChild: Node): Node;
-        insertBefore(newChild: Node, refChild: Node | null): Node;
-        cloneNode(deep?: boolean): Node;
-        [key: string]: any;
-    }
-
-    interface NodeList {
-        length: number;
-        item(index: number): Node | null;
-        [index: number]: Node;
-        forEach(callbackfn: (value: Node, key: number, parent: NodeList) => void, thisArg?: any): void;
     }
 }
 `;
+        monacoInstance.languages.typescript.typescriptDefaults.addExtraLib(minimalReactDTS, 'file:///node_modules/@types/react/index.d.ts');
+        monacoInstance.languages.typescript.javascriptDefaults.addExtraLib(minimalReactDTS, 'file:///node_modules/@types/react/index.d.ts');
 
-        // Add the comprehensive types to Monaco
-        monacoInstance.languages.typescript.typescriptDefaults.addExtraLib(
-            comprehensiveTypes,
-            'file:///node_modules/@types/react/index.d.ts'
-        );
+        // --- Stub for react-dom/client ---
+        const reactDomClientDTS = `
+declare module 'react-dom/client' {
+    import { ReactNode } from 'react';
+    export interface Root {
+        render(children: ReactNode): void;
+        unmount(): void;
+    }
+    export function createRoot(container: Element | DocumentFragment | null, options?: { hydrate?: boolean }): Root;
+}
+`;
+        monacoInstance.languages.typescript.typescriptDefaults.addExtraLib(reactDomClientDTS, 'file:///node_modules/@types/react-dom/client/index.d.ts');
+        monacoInstance.languages.typescript.javascriptDefaults.addExtraLib(reactDomClientDTS, 'file:///node_modules/@types/react-dom/client/index.d.ts');
 
-        monacoInstance.languages.typescript.javascriptDefaults.addExtraLib(
-            comprehensiveTypes,
-            'file:///node_modules/@types/react/index.d.ts'
-        );
+        // --- Stubs for local modules (example) ---
+        const appStubDTS = `
+declare module './App.tsx' { // Path should match import in user's code
+    import { ReactElement } from 'react';
+    const App: () => ReactElement;
+    export default App;
+}
+`;
+        // Using a generic path for the stub might be necessary if Monaco doesn't resolve relative paths well for addExtraLib
+        monacoInstance.languages.typescript.typescriptDefaults.addExtraLib(appStubDTS, 'file:///App.tsx.d.ts'); // Or try 'file:///./App.tsx'
+        monacoInstance.languages.typescript.javascriptDefaults.addExtraLib(appStubDTS, 'file:///App.tsx.d.ts');
+
+        const cssStubDTS = `
+declare module './index.css' { // Path should match import
+    const styles: { [className: string]: string };
+    export default styles;
+}
+`;
+        monacoInstance.languages.typescript.typescriptDefaults.addExtraLib(cssStubDTS, 'file:///index.css.d.ts'); // Or try 'file:///./index.css'
+        monacoInstance.languages.typescript.javascriptDefaults.addExtraLib(cssStubDTS, 'file:///index.css.d.ts');
+
+        // Add more stubs as needed for other direct imports in user's entry files
 
         // Configure editor options
         editorInstance.updateOptions({

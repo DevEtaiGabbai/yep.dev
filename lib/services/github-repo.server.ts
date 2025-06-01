@@ -2,8 +2,8 @@ import { db } from '@/lib/db';
 import { getGitHubRepoContent, GitHubFile } from '@/lib/utils';
 import 'server-only';
 
-// Duration to consider a cached repo valid (default: 12 hours)
-const CACHE_DURATION_MS = 12 * 60 * 60 * 1000;
+// Duration to consider a cached repo valid (default: 30 days)
+const CACHE_DURATION_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface CachedGitHubRepo {
   id: string;
@@ -42,8 +42,6 @@ export async function getGitHubRepoFiles(
   // Fetch files from GitHub
   try {
     const fetchedFiles = await getGitHubRepoContent(repoName);
-
-    // Save files to database (upsert operation)
     await upsertGitHubRepo(repoName, fetchedFiles);
 
     return fetchedFiles;

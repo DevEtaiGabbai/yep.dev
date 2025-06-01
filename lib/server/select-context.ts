@@ -150,8 +150,6 @@ Please respond ONLY with a list of file paths without any explanation or comment
     .map((file) => file.trim())
     .filter((file) => file.length > 0);
 
-  console.debug('Selected Files:', selectedFiles);
-
   // Step 3: Create the actual context from selected files
   const selectedFileMap: FileMap = {};
   selectedFiles.forEach((file) => {
@@ -189,7 +187,6 @@ Please respond ONLY with a list of file paths without any explanation or comment
       normalizedPath = normalizedPath.substring(1);
     }
 
-    // Use the normalized path as the new key
     normalizedFileMap[normalizedPath] = selectedFileMap[path];
   });
 

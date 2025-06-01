@@ -4,14 +4,12 @@ import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
-// API key creation schema
 const apiKeySchema = z.object({
     name: z.string().min(1, "Name is required"),
     provider: z.string().min(1, "Provider is required"),
     key: z.string().min(1, "API key is required"),
 });
 
-// API key update schema
 const updateApiKeySchema = z.object({
     key: z.string().min(1, "API key is required"),
 });
@@ -33,7 +31,7 @@ export async function GET() {
                 id: true,
                 name: true,
                 provider: true,
-                key: true, // Include the actual key for use in the app
+                key: true,
                 createdAt: true,
                 updatedAt: true,
             },
@@ -49,7 +47,6 @@ export async function GET() {
     }
 }
 
-// Create a new API key
 export async function POST(req: NextRequest) {
     try {
         const session = await getServerSession(authOptions);
@@ -61,7 +58,6 @@ export async function POST(req: NextRequest) {
         const body = await req.json();
         const { name, provider, key } = apiKeySchema.parse(body);
 
-        // Check if user already has an API key for this provider
         const existingApiKey = await db.apiKey.findFirst({
             where: {
                 userId: session.user.id,
@@ -70,7 +66,6 @@ export async function POST(req: NextRequest) {
         });
 
         if (existingApiKey) {
-            // Update existing key
             const updatedApiKey = await db.apiKey.update({
                 where: {
                     id: existingApiKey.id,
@@ -95,7 +90,6 @@ export async function POST(req: NextRequest) {
                 { status: 200 }
             );
         } else {
-            // Create new API key
             const apiKey = await db.apiKey.create({
                 data: {
                     name,

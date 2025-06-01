@@ -34,6 +34,7 @@ interface WorkbenchProps {
     isProcessingFiles?: boolean;
     streamingComplete?: boolean;
     activeFileFromAI?: string | null;
+    projectId: string | null;
 }
 
 const sliderOptions: Array<{ value: WorkbenchViewType; label: string }> = [
@@ -47,11 +48,12 @@ export function Workbench({
     isProcessingFiles = false,
     streamingComplete = true,
     activeFileFromAI = null,
+    projectId,
 }: WorkbenchProps) {
     const { data: session } = useSession();
     const params = useParams();
     const conversationId = typeof params.id === 'string' ? params.id : '';
-    
+
     const workbenchState = useStore($workbench);
     const {
         showWorkbench,
@@ -68,7 +70,6 @@ export function Workbench({
 
     const { webContainerInstance } = useWebContainer(mainTerminalRef);
     const [isDownloading, setIsDownloading] = useState(false);
-    const [projectId, setProjectId] = useState<string | null>(null);
 
     const isCurrentFileUnsaved = currentDocument ? unsavedFiles.has(currentDocument.filePath) : false;
 
@@ -89,56 +90,6 @@ export function Workbench({
             }
         }
     }, [isProcessingFiles, streamingComplete, activeFileFromAI, selectedFile, currentView, files]);
-
-    // Get or create project for this conversation
-    useEffect(() => {
-        const getOrCreateProject = async () => {
-            if (!session?.user?.id || !conversationId) return;
-
-            try {
-                // First try to get existing project for this conversation
-                const response = await fetch(`/api/conversations/${conversationId}`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.conversation?.projectId) {
-                        setProjectId(data.conversation.projectId);
-                        return;
-                    }
-                }
-
-                // If no project exists, create one
-                const createResponse = await fetch('/api/projects', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        name: `Project_${conversationId.slice(0, 8)}`,
-                    }),
-                });
-
-                if (createResponse.ok) {
-                    const createData = await createResponse.json();
-                    setProjectId(createData.project.id);
-
-                    // Link the project to the conversation
-                    await fetch(`/api/conversations/${conversationId}`, {
-                        method: 'PATCH',
-                        headers: {
-                            'Content-Type': 'application/json',
-                        },
-                        body: JSON.stringify({
-                            projectId: createData.project.id,
-                        }),
-                    });
-                }
-            } catch (error) {
-                console.error('Error getting or creating project:', error);
-            }
-        };
-
-        getOrCreateProject();
-    }, [session?.user?.id, conversationId]);
 
     // Auto-sync files when they change or when streaming completes
     useEffect(() => {
@@ -176,7 +127,7 @@ export function Workbench({
             const success = await saveCurrentFile(webContainerInstance);
             if (success) {
                 toast({ title: "File Saved", description: `${currentDocument.filePath.split('/').pop()} saved.` });
-                
+
                 // Trigger sync after save
                 if (webContainerInstance && projectId && session?.user?.id) {
                     try {
@@ -215,10 +166,10 @@ export function Workbench({
 
     const handleDownloadProject = useCallback(async () => {
         if (!projectId || !session?.user?.id) {
-            toast({ 
-                title: "Download Error", 
-                description: "No project available to download.", 
-                variant: "destructive" 
+            toast({
+                title: "Download Error",
+                description: "No project available to download.",
+                variant: "destructive"
             });
             return;
         }
@@ -241,7 +192,7 @@ export function Workbench({
 
             // Download the project
             const response = await fetch(`/api/projects/${projectId}/download`);
-            
+
             if (!response.ok) {
                 throw new Error(`Download failed: ${response.statusText}`);
             }
@@ -263,16 +214,16 @@ export function Workbench({
             window.URL.revokeObjectURL(url);
             document.body.removeChild(a);
 
-            toast({ 
-                title: "Project Downloaded", 
-                description: `${filename} downloaded successfully.` 
+            toast({
+                title: "Project Downloaded",
+                description: `${filename} downloaded successfully.`
             });
         } catch (error) {
             console.error('Error downloading project:', error);
-            toast({ 
-                title: "Download Error", 
-                description: `Failed to download project: ${error instanceof Error ? error.message : 'Unknown error'}`, 
-                variant: "destructive" 
+            toast({
+                title: "Download Error",
+                description: `Failed to download project: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                variant: "destructive"
             });
         } finally {
             setIsDownloading(false);
@@ -281,7 +232,7 @@ export function Workbench({
 
     return (
         <div className="flex flex-col h-full bg-[#101012] border-l border-[#313133] shadow-lg text-sm text-[#c0c0c0]">
-            <div className="flex items-center p-2 border-b border-[#313133] flex-shrink-0 bg-[#161618] h-10">
+            <div className="flex items-center pr-2 border-b border-[#313133] flex-shrink-0 bg-[#161618]">
                 <CodePreviewTab value={currentView} onValueChange={(val) => setWorkbenchView(val as WorkbenchViewType)}>
                     <CodePreviewTabList className="h-8">
                         {sliderOptions.map(option => (
@@ -308,14 +259,14 @@ export function Workbench({
                             <Icons.save className="h-3.5 w-3.5 mr-1" /> Save
                         </Button>
                     )}
-                    <Button
+                    {/* <Button
                         variant="ghost"
                         size="sm"
                         onClick={handleReset}
                         className="text-xs h-7 px-2 text-[#c0c0c0] hover:text-white hover:bg-[#2a2a2c]"
                     >
                         <Icons.reset className="h-3.5 w-3.5 mr-1" /> Reset
-                    </Button>
+                    </Button> */}
                 </div>
 
                 {currentView === 'Diff' && pendingAIChange && (
@@ -342,10 +293,10 @@ export function Workbench({
                 )}
 
                 <div className="ml-auto flex items-center space-x-1">
-                    <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        onClick={handleDownloadProject} 
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={handleDownloadProject}
                         disabled={isDownloading || !projectId}
                         className="h-7 w-7 text-[#c0c0c0] hover:text-white hover:bg-[#2a2a2c] disabled:opacity-50"
                         title={projectId ? "Download Project" : "No project available"}

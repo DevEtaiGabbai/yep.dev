@@ -121,17 +121,14 @@ export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null
             }
 
             // Show success message in terminal
-            terminalRef.current?.writeToTerminal('\r\n\x1b[32m📦 Package.json refreshed in editor\x1b[0m\r\n');
+            // terminalRef.current?.writeToTerminal('\r\n\x1b[32m📦 Package.json refreshed in editor\x1b[0m\r\n');
 
           } catch (error) {
             console.error('[useWebContainer] ❌ Failed to refresh package.json:', error);
             terminalRef.current?.writeToTerminal('\r\n\x1b[31m❌ Failed to refresh package.json in editor\x1b[0m\r\n');
           }
-        }, 1500); // Increased delay to ensure file is written
-      } else if (result.exitCode === 0) {
-      } else {
+        }, 1500);
       }
-
       return result;
     } catch (error) {
       console.error('[useWebContainer] Error executing command:', error);
@@ -572,7 +569,6 @@ export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null
       }
     };
 
-    // Initial read
     checkPackageJsonChanges();
 
     // Check every 2 seconds for changes
@@ -586,7 +582,7 @@ export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null
 
   return {
     webContainerInstance,
-    previews: $workbench.get().previews, // Get previews from the store
+    previews: $workbench.get().previews,
     isInitializingWebContainer,
     isInstallingDeps,
     isStartingDevServer,

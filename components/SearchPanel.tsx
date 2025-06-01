@@ -2,7 +2,7 @@
 
 import { $workbench, setSelectedFile, setWorkbenchView, type WorkbenchFile } from '@/app/lib/stores/workbenchStore';
 import { useStore } from '@nanostores/react';
-import { ChevronDown, ChevronRight, Circle, Code, File, Replace, Search, Type, X } from 'lucide-react';
+import { ChevronDown, ChevronRight, Circle, Code, File, Search, Type, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -87,7 +87,7 @@ export function SearchPanel() {
         if (fileEntry?.type === 'file') {
           const file = fileEntry as WorkbenchFile;
           if (file.isBinary) return; // Skip binary files
-          
+
           // Skip certain files that are typically not useful for search
           const fileName = filePath.split('/').pop() || '';
           const excludedFiles = [
@@ -104,7 +104,7 @@ export function SearchPanel() {
 
           lines.forEach((line, lineIndex) => {
             let match;
-            searchRegex.lastIndex = 0; // Reset regex state
+            searchRegex.lastIndex = 0;
 
             while ((match = searchRegex.exec(line)) !== null) {
               const matchStart = match.index;
@@ -151,12 +151,19 @@ export function SearchPanel() {
   // Auto-expand files with results
   useEffect(() => {
     if (searchResults.length > 0) {
-      const newExpanded = new Set(expandedFiles);
-      searchResults.forEach(result => {
-        newExpanded.add(result.filePath);
+      setExpandedFiles(prevExpandedFiles => {
+        const newExpanded = new Set(prevExpandedFiles);
+        let changed = false;
+        searchResults.forEach(result => {
+          if (!newExpanded.has(result.filePath)) {
+            newExpanded.add(result.filePath);
+            changed = true;
+          }
+        });
+        return changed ? newExpanded : prevExpandedFiles;
       });
-      setExpandedFiles(newExpanded);
     }
+
   }, [searchResults]);
 
   const toggleFileExpansion = useCallback((filePath: string) => {
@@ -172,10 +179,8 @@ export function SearchPanel() {
   }, []);
 
   const handleResultClick = useCallback((filePath: string, line?: number, column?: number) => {
-    // Set the selected file in workbench - this will automatically load the file content
     setSelectedFile(filePath);
-    
-    // Switch to Editor view to show the file content
+
     setWorkbenchView('Editor');
 
     // If line/column provided, scroll to that position
@@ -229,7 +234,7 @@ export function SearchPanel() {
         </div>
 
         {/* Replace Input */}
-        {showReplace && (
+        {/* {showReplace && (
           <div className="relative">
             <Replace className="absolute left-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-[#969798]" />
             <Input
@@ -239,7 +244,7 @@ export function SearchPanel() {
               className="pl-8 bg-[#161618] border-[#313133] text-[#c0c0c0] placeholder:text-[#969798] focus:border-[#007acc] focus:outline-none focus:ring-0 text-sm"
             />
           </div>
-        )}
+        )} */}
 
         {/* Search Options */}
         <div className="flex items-center justify-between">
@@ -273,7 +278,7 @@ export function SearchPanel() {
             </Button>
           </div>
 
-          <div className="flex items-center space-x-1">
+          {/* <div className="flex items-center space-x-1">
             <Button
               variant="ghost"
               size="sm"
@@ -283,7 +288,7 @@ export function SearchPanel() {
             >
               <Replace className="h-3 w-3" />
             </Button>
-          </div>
+          </div> */}
         </div>
 
         {/* Results Summary */}
@@ -364,7 +369,7 @@ export function SearchPanel() {
       </ScrollArea>
 
       {/* Replace Actions */}
-      {showReplace && debouncedSearchQuery && searchResults.length > 0 && (
+      {/* {showReplace && debouncedSearchQuery && searchResults.length > 0 && (
         <div className="p-2 border-t border-[#313133]">
           <Button
             variant="outline"
@@ -375,7 +380,7 @@ export function SearchPanel() {
             Replace All ({totalMatches})
           </Button>
         </div>
-      )}
+      )} */}
     </div>
   );
 }

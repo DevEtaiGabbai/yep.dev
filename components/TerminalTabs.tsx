@@ -58,8 +58,11 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
   }, [sessions]);
 
   useEffect(() => {
+    // Copy the ref value to a variable to use in cleanup
+    const currentTimeouts = initializeTimeoutsRef.current;
+    
     return () => {
-      Object.values(initializeTimeoutsRef.current).forEach(timeout => {
+      Object.values(currentTimeouts).forEach(timeout => {
         clearTimeout(timeout);
       });
     };
@@ -70,7 +73,7 @@ const TerminalTabs: React.FC<TerminalTabsProps> = ({
       console.log(`Terminal ${id} dimensions updated to ${cols}x${rows}`);
       terminalActions.updateTerminalDimensions(id, cols, rows);
     }
-  }, [terminalActions]);
+  }, []);
 
   const safeInitializeTerminal = useCallback((terminalId: string) => {
     // Skip initialization for 'bolt' terminal, it's managed by persistent shell logic

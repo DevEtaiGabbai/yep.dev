@@ -1,3 +1,4 @@
+import { getUserApiKeys } from '@/lib/api-keys';
 import { MAX_TOKENS_NO_SUMMARY } from '@/lib/constants';
 import { CONTINUE_PROMPT, WORK_DIR } from '@/lib/prompt';
 import { createSummary } from '@/lib/server/create-summary';
@@ -9,18 +10,6 @@ import { addMessage, getConversation } from '@/lib/services/conversationService'
 import { countMessageTokens } from '@/lib/tokenizer';
 import type { ContextAnnotation, FileMap, IProviderSetting, ProgressAnnotation } from '@/lib/types/index';
 import { createDataStream, generateId } from 'ai';
-
-// Helper function to extract text content from mixed content types
-const getTextContent = (content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>): string => {
-  if (typeof content === 'string') {
-    return content;
-  }
-  // For array content, extract text from text blocks
-  return content
-    .filter(item => item.type === 'text' && item.text)
-    .map(item => item.text)
-    .join(' ');
-};
 
 const MAX_RESPONSE_SEGMENTS = 10;
 const MAX_TOKENS = 65536;
@@ -113,24 +102,11 @@ export async function POST(request: Request) {
         }
       } catch (error) {
         console.error("API Chat Route: Error checking existing conversation:", error);
-        // Continue with normal processing if there's an error checking the conversation
-      }
-    }
-
-    // For debugging initial messages - log message content for first and last message in more detail
-    if (messages.length >= 1) {
-      // for (let i = 0; i < Math.min(messages.length, 3); i++) {
-      //   console.log(`API Chat Route: Message ${i + 1} - role: ${messages[i].role}, content: "${getTextContent(messages[i].content).substring(0, 200)}${getTextContent(messages[i].content).length > 200 ? '...' : ''}"`);
-      // }
-
-      // Always log the last message if there are more than 3
-      if (messages.length > 3) {
-        const lastIdx = messages.length - 1;
       }
     }
 
     const cookieHeader = request.headers.get('Cookie');
-    const apiKeys = JSON.parse(parseCookies(cookieHeader || '').apiKeys || '{}');
+    const apiKeys = await getUserApiKeys();
 
     const providerSettings: Record<string, IProviderSetting> = JSON.parse(
       parseCookies(cookieHeader || '').providers || '{}',
@@ -234,9 +210,7 @@ export async function POST(request: Request) {
               summary,
               chatId: messages.slice(-1)?.[0]?.id,
             } as ContextAnnotation);
-          } else {
           }
-
           // Update context buffer
           dataStream.writeData({
             type: 'progress',
@@ -265,12 +239,6 @@ export async function POST(request: Request) {
               }
             },
           });
-
-          if (filteredFiles) {
-            // console.log(`files in context : ${JSON.stringify(Object.keys(filteredFiles))}`);
-          } else {
-            // console.log("No filtered files returned from selectContext");
-          }
 
           // Process paths to ensure they're all relative
           const processedPaths = Object.keys(filteredFiles).map((key) => {
@@ -302,7 +270,6 @@ export async function POST(request: Request) {
             message: 'Code Files Selected',
           } satisfies ProgressAnnotation);
 
-          // logger.debug('Code Files Selected');
         }
 
         const options: StreamingOptions = {
@@ -352,8 +319,6 @@ export async function POST(request: Request) {
             if (stream.switches >= MAX_RESPONSE_SEGMENTS) {
               throw Error('Cannot continue message: Maximum segments reached');
             }
-
-            const switchesLeft = MAX_RESPONSE_SEGMENTS - stream.switches;
 
             const lastUserMessage = messages.filter((x) => x.role == 'user').slice(-1)[0];
             const { provider } = extractPropertiesFromMessage(lastUserMessage);

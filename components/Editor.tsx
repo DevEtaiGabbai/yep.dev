@@ -1,9 +1,9 @@
 'use client';
 
-import { BinaryFile } from '@/components/BinaryFile'; // Import the new component
+import { BinaryFile } from '@/components/BinaryFile';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { FileEntry } from '@/types'; // Assuming FileEntry is in @/types
+import { FileEntry } from '@/types';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { ChevronRight, FileIcon, LoaderCircle, Pencil } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -207,14 +207,13 @@ export function CodeEditor({
             lastContentLengthRef.current = newContent.length;
 
             // Check if the new content is binary/unreadable
-            const isUnreadable = newContent.includes('\0'); // Simple null byte check
+            const isUnreadable = newContent.includes('\0');
             setIsBinaryOrUnreadable(isUnreadable);
 
             // Update the editor content only if it's readable
             if (!isUnreadable) {
               setFileContent(newContent);
-              setUnsavedContent(newContent); // Keep unsaved in sync during streaming
-
+              setUnsavedContent(newContent);
               // Auto-scroll to the bottom of the editor after content update
               if (editorRef.current) {
                 setTimeout(() => {
@@ -302,9 +301,8 @@ export function CodeEditor({
             if (err instanceof Error && err.message.includes('EISDIR')) {
               throw new Error('Selected item is a directory, not a file.');
             }
-            // Assume other errors might mean it's unreadable/binary
             setIsBinaryOrUnreadable(true);
-            throw err; // Re-throw after setting flag
+            throw err;
           }
         }
         else {

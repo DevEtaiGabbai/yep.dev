@@ -3,14 +3,15 @@ import {
     Dialog,
     DialogContent,
     DialogHeader,
-    DialogTitle
+    DialogTitle,
+    DialogDescription
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ApiKeyCache } from "@/lib/api-key-cache";
 import { DEFAULT_PROVIDER } from "@/lib/provider";
 import { Check, Eye, EyeOff, Loader2, Pencil, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface ApiKey {
     id: string;
@@ -37,7 +38,7 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
     const [success, setSuccess] = useState<string | null>(null);
 
     // Load API keys when modal opens - try cache first, then database
-    const loadApiKeys = async () => {
+    const loadApiKeys = useCallback(async () => {
         if (!open) return;
 
         try {
@@ -85,11 +86,11 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
         } finally {
             setIsLoading(false);
         }
-    };
+    }, [open]);
 
     useEffect(() => {
         loadApiKeys();
-    }, [open]);
+    }, [loadApiKeys]);
 
     // Verify API key with OpenRouter
     const verifyApiKey = async (apiKey: string): Promise<boolean> => {
@@ -207,6 +208,7 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
             <DialogContent className="sm:max-w-md border border-[#313133] rounded-xl bg-[#161618] shadow-sm">
                 <DialogHeader>
                     <DialogTitle className="text-center text-white">Update API Keys</DialogTitle>
+                    <DialogDescription className="sr-only">Update your API keys for different providers.</DialogDescription>
                 </DialogHeader>
 
                 <div className="space-y-4">

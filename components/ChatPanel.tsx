@@ -19,20 +19,19 @@ import {
   AlertTriangle,
   ArrowUp,
   ChevronDown,
-  Image,
+  Image as ImageIcon,
   Loader2,
   RefreshCw,
   X
 } from 'lucide-react';
+import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import { Icons } from './ui/icons';
 
-// Helper functions to handle mixed content types
 const getTextContent = (content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>): string => {
   if (typeof content === 'string') {
     return content;
   }
-  // For array content, extract text from text blocks
   return content
     .filter(item => item.type === 'text' && item.text)
     .map(item => item.text)
@@ -59,7 +58,6 @@ interface ChatPanelProps {
   onModelChange?: (model: string) => void;
 }
 
-// Add a function to format error details for display
 const formatErrorForDisplay = (errorMessage: string) => {
 
 
@@ -84,10 +82,7 @@ const formatErrorForDisplay = (errorMessage: string) => {
     );
   }
 
-  // Extract details from full API error traces if possible
   let formattedError = errorMessage;
-
-  // If the error contains stack trace or API details, format it better
   if (errorMessage.includes('APICallError') || errorMessage.includes('statusCode:')) {
     // Try to extract the important parts like the actual error message and status code
     const errorLines = errorMessage.split('\n');
@@ -153,7 +148,6 @@ export const ChatPanel = ({
     "all"
   );
 
-  // const { providers, isLoading, error } = useProviders();
   const [model, setModel] = useState(() => {
     const savedModel = Cookies.get("selectedModel");
     return savedModel || "DEFAULT_MODEL";
@@ -161,15 +155,6 @@ export const ChatPanel = ({
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      // let parsedApiKeys: Record<string, string> | undefined = {};
-
-      // try {
-      //   parsedApiKeys = { a: "getApiKeysFromCookies()" }
-      //   setApiKeys(parsedApiKeys);
-      // } catch (error) {
-      //   console.error('Error loading API keys from cookies:', error);
-      //   // Cookies.remove('apiKeys');
-      // }
 
       setIsModelLoading('all');
       fetch('/api/models')
@@ -186,19 +171,6 @@ export const ChatPanel = ({
         });
     }
   }, []);
-
-  // Log messages changes for debugging
-  useEffect(() => {
-    console.log(`ChatPanel: Messages updated. Count: ${messages.length}`);
-    if (messages.length > 0) {
-      const lastMessage = messages[messages.length - 1];
-      const textContent = getTextContent(lastMessage.content);
-      console.log(`Last message - role: ${lastMessage.role}, content length: ${textContent.length}`);
-      if (textContent.length > 0) {
-        console.log(`Content preview: "${textContent.substring(0, 100)}..."`);
-      }
-    }
-  }, [messages]);
 
   useEffect(() => {
     if (openRouterError) {
@@ -440,9 +412,11 @@ export const ChatPanel = ({
             <div className="flex flex-wrap gap-2">
               {uploadedImages.map((image, index) => (
                 <div key={index} className="relative group">
-                  <img
+                  <Image
                     src={image.url}
-                    alt={image.filename}
+                    alt={image.filename || 'Uploaded image'}
+                    width={80}
+                    height={80}
                     className="w-20 h-20 object-cover rounded border border-[#313133]"
                   />
                   <button
@@ -509,7 +483,7 @@ export const ChatPanel = ({
                 {isUploading ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
-                  <Image className="w-4 h-4" />
+                  <ImageIcon className="w-4 h-4" />
                 )}
               </Button>
 

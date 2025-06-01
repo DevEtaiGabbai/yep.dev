@@ -1,7 +1,5 @@
-// components/PreviewPanel.tsx
 'use client';
 
-import { expoUrlAtom } from '@/app/lib/stores/qrCodeStore';
 import { $workbench, setActivePreview } from '@/app/lib/stores/workbenchStore';
 import { useStore } from '@nanostores/react';
 import { ExternalLink, RefreshCw } from 'lucide-react';
@@ -9,34 +7,18 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { PortDropdown } from './PortDropdown';
 import { Button } from './ui/button';
 import { Icons } from './ui/icons';
-// import { ScreenshotSelector } from './ScreenshotSelector'; // <--- COMMENT OUT or REMOVE
-// import { ExpoQrModal } from './ExpoQrModal'; // You might not need this either
 
 export function PreviewPanel() {
   const workbenchState = useStore($workbench);
   const { activePreviewUrl, previews, activePreviewPort } = workbenchState;
 
-  const expoUrl = useStore(expoUrlAtom);
-
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeSrc, setIframeSrc] = useState<string | null>(activePreviewUrl);
-  const [isExpoQrModalOpen, setIsExpoQrModalOpen] = useState(false);
-  // const [isSelectionMode, setIsSelectionMode] = useState(false); // <--- COMMENT OUT or REMOVE
-
-  // ... (useEffect for iframeSrc and expoUrl) ...
   useEffect(() => {
     if (activePreviewUrl !== iframeSrc) {
       setIframeSrc(activePreviewUrl);
     }
-  }, [activePreviewUrl, iframeSrc]); // Added iframeSrc to dependencies
-
-  useEffect(() => {
-    if (expoUrl && workbenchState.currentView === 'Preview') {
-      setIsExpoQrModalOpen(true);
-    } else {
-      setIsExpoQrModalOpen(false);
-    }
-  }, [expoUrl, workbenchState.currentView]);
+  }, [activePreviewUrl, iframeSrc]);
 
 
   const handleRefresh = useCallback(() => {
@@ -86,14 +68,7 @@ export function PreviewPanel() {
           // onSelectPreview={handleActivePreviewChange} // Action to update store
           />
         )}
-        {/* <Button variant="ghost" size="icon" onClick={() => setIsSelectionMode(true)} disabled={!iframeSrc} className="text-[#969798] hover:text-white h-7 w-7">
-                    <Icons.screenshot className="h-4 w-4" />
-                </Button> */}
-        {/* {expoUrl && (
-                     <Button variant="ghost" size="icon" onClick={() => setIsExpoQrModalOpen(true)} className="text-[#969798] hover:text-white h-7 w-7">
-                        <QrCode size={16} />
-                    </Button>
-                )} */}
+
         <Button variant="ghost" size="icon" onClick={handleOpenInNewTab} disabled={!iframeSrc} className="text-[#969798] hover:text-white h-7 w-7">
           <ExternalLink size={16} />
         </Button>
@@ -117,15 +92,8 @@ export function PreviewPanel() {
             <p className="text-xs mt-1 opacity-70">Ensure your application&apos;s dev server is running.</p>
           </div>
         )}
-        {/* {iframeSrc && (
-                    <ScreenshotSelector
-                        isSelectionMode={isSelectionMode}
-                        setIsSelectionMode={setIsSelectionMode}
-                        containerRef={iframeRef}
-                    />
-                )} */}
+
       </div>
-      {/* <ExpoQrModal open={isExpoQrModalOpen} onClose={() => setIsExpoQrModalOpen(false)} /> */}
     </div>
   );
 }

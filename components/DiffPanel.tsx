@@ -2,14 +2,13 @@
 'use client';
 
 import { $workbench, type WorkbenchFile } from '@/app/lib/stores/workbenchStore';
+import { toast } from '@/hooks/use-toast';
 import { getLanguageForFilename } from '@/lib/utils';
 import { useStore } from '@nanostores/react';
 import { ScrollArea } from '@radix-ui/react-scroll-area';
-import { Code } from "./ui/code";
+import { Copy, Download, Eye, EyeOff } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { Button } from './ui/button';
-import { Copy, Download, Eye, EyeOff, RotateCcw } from 'lucide-react';
-import { useState, useMemo } from 'react';
-import { toast } from '@/hooks/use-toast';
 
 interface DiffLine {
     type: 'added' | 'removed' | 'unchanged' | 'modified';
@@ -56,18 +55,10 @@ export function DiffPanel() {
         diffSource = historyEntry ? 'history' : 'current-selection';
     }
 
-    if (!displayFilePath) {
-        return (
-            <div className="flex items-center justify-center h-full text-[#969798] p-4 text-center">
-                {pendingAIChange ? "Loading AI proposed changes..." : "Select a file or let AI suggest changes to view differences."}
-            </div>
-        );
-    }
-
     const hasActualChanges = displayOriginalContent !== displayModifiedContent;
-    const language = getLanguageForFilename(displayFilePath);
+    const language = getLanguageForFilename(displayFilePath || '');
 
-    // Compute diff lines for better visualization
+    // Always call useMemo hooks regardless of early returns
     const diffLines = useMemo(() => {
         if (!hasActualChanges) return [];
 
@@ -75,29 +66,25 @@ export function DiffPanel() {
         const modifiedLines = displayModifiedContent.split('\n');
         const lines: DiffLine[] = [];
 
-        // Simple line-by-line diff (could be enhanced with proper diff algorithm)
         const maxLines = Math.max(originalLines.length, modifiedLines.length);
-        
+
         for (let i = 0; i < maxLines; i++) {
             const originalLine = originalLines[i];
             const modifiedLine = modifiedLines[i];
 
             if (originalLine === undefined) {
-                // Line added
                 lines.push({
                     type: 'added',
                     newLineNumber: i + 1,
                     content: modifiedLine || '',
                 });
             } else if (modifiedLine === undefined) {
-                // Line removed
                 lines.push({
                     type: 'removed',
                     oldLineNumber: i + 1,
                     content: originalLine,
                 });
             } else if (originalLine === modifiedLine) {
-                // Line unchanged
                 lines.push({
                     type: 'unchanged',
                     oldLineNumber: i + 1,
@@ -105,7 +92,6 @@ export function DiffPanel() {
                     content: originalLine,
                 });
             } else {
-                // Line modified
                 lines.push({
                     type: 'modified',
                     oldLineNumber: i + 1,
@@ -126,13 +112,22 @@ export function DiffPanel() {
         return { added, removed, modified };
     }, [diffLines]);
 
+    // Early return after all hooks are called
+    if (!displayFilePath) {
+        return (
+            <div className="flex items-center justify-center h-full text-[#969798] p-4 text-center">
+                {pendingAIChange ? "Loading AI proposed changes..." : "Select a file or let AI suggest changes to view differences."}
+            </div>
+        );
+    }
+
     const handleCopyDiff = async () => {
         try {
             const diffText = diffLines.map(line => {
                 const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
                 return `${prefix} ${line.content}`;
             }).join('\n');
-            
+
             await navigator.clipboard.writeText(diffText);
             toast({ title: "Diff copied to clipboard" });
         } catch (error) {
@@ -145,7 +140,7 @@ export function DiffPanel() {
             const prefix = line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ';
             return `${prefix} ${line.content}`;
         }).join('\n');
-        
+
         const blob = new Blob([diffText], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -219,7 +214,7 @@ export function DiffPanel() {
                             <p className="text-xs text-orange-400">Unsaved local changes.</p>
                         )}
                     </div>
-                    
+
                     {hasActualChanges && (
                         <div className="flex items-center space-x-4 text-xs">
                             {stats.added > 0 && (
@@ -255,10 +250,9 @@ export function DiffPanel() {
                                         line.type !== 'added' && (
                                             <div
                                                 key={index}
-                                                className={`flex ${
-                                                    line.type === 'removed' ? 'bg-red-900/20' :
+                                                className={`flex ${line.type === 'removed' ? 'bg-red-900/20' :
                                                     line.type === 'modified' ? 'bg-yellow-900/20' : ''
-                                                }`}
+                                                    }`}
                                             >
                                                 <span className="w-12 text-right pr-2 text-[#969798] bg-[#161618] border-r border-[#313133] flex-shrink-0">
                                                     {line.oldLineNumber}
@@ -284,10 +278,9 @@ export function DiffPanel() {
                                         line.type !== 'removed' && (
                                             <div
                                                 key={index}
-                                                className={`flex ${
-                                                    line.type === 'added' ? 'bg-green-900/20' :
+                                                className={`flex ${line.type === 'added' ? 'bg-green-900/20' :
                                                     line.type === 'modified' ? 'bg-yellow-900/20' : ''
-                                                }`}
+                                                    }`}
                                             >
                                                 <span className="w-12 text-right pr-2 text-[#969798] bg-[#161618] border-r border-[#313133] flex-shrink-0">
                                                     {line.newLineNumber}
@@ -309,11 +302,10 @@ export function DiffPanel() {
                             {diffLines.map((line, index) => (
                                 <div
                                     key={index}
-                                    className={`flex ${
-                                        line.type === 'added' ? 'bg-green-900/20' :
+                                    className={`flex ${line.type === 'added' ? 'bg-green-900/20' :
                                         line.type === 'removed' ? 'bg-red-900/20' :
-                                        line.type === 'modified' ? 'bg-yellow-900/20' : ''
-                                    }`}
+                                            line.type === 'modified' ? 'bg-yellow-900/20' : ''
+                                        }`}
                                 >
                                     <span className="w-12 text-right pr-2 text-[#969798] bg-[#161618] border-r border-[#313133] flex-shrink-0">
                                         {line.oldLineNumber || line.newLineNumber}

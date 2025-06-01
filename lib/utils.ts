@@ -180,7 +180,7 @@ export const getGitHubRepoContent = async (
           }
         } else {
           // For larger files, note that they're too large
-          fileContent = `// File too large to fetch automatically (${Math.round(item.size/1024)}KB)\n// Edit this file to load its content.`;
+          fileContent = `// File too large to fetch automatically (${Math.round(item.size / 1024)}KB)\n// Edit this file to load its content.`;
         }
 
         contents.push({ name: item.name, path: item.path, content: fileContent });
@@ -215,9 +215,9 @@ const generateTextTree = (tree: FileSystemTree, prefix = ''): string => {
 
 // Define the structure for the output
 export interface AIContextData {
-    treeString: string;
-    contentString: string; // Combined content of critical/selected files
-    files: Record<string, FileEntry>; // Keep the raw files if needed elsewhere
+  treeString: string;
+  contentString: string;
+  files: Record<string, FileEntry>;
 }
 
 export const transformGitHubFilesToState = (files: GitHubFile[]) => {
@@ -260,7 +260,6 @@ export const createMountableFileSystem = (
   // Build WebContainer-compatible file system structure
   const fileSystem: Record<string, any> = {};
 
-  // Debug tracking
   const pathsIncluded = new Set<string>();
 
   for (const file of processedFiles) {
@@ -299,15 +298,6 @@ export const createMountableFileSystem = (
       currentLevel[fileName] = { file: { contents: file.content } };
       pathsIncluded.add(file.path);
     }
-  }
-
-  console.log(`Completed file system generation. Included ${pathsIncluded.size} paths.`);
-
-  // Debug info for components/ui path specifically
-  if (pathsIncluded.has('components/ui')) {
-    console.log('components/ui folder was successfully included');
-  } else {
-    console.log('Warning: components/ui folder was NOT included');
   }
 
   return fileSystem;

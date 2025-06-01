@@ -1,4 +1,4 @@
-"use client";
+'use client'
 
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -17,9 +17,10 @@ import {
 } from "@/components/ui/sidebar";
 import { DEFAULT_TEMPLATE } from "@/lib/constants";
 import { Conversation } from "@/lib/services/conversationService";
+import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import * as React from "react";
 import { useEffect, useState } from "react";
 import { NavUser } from "./nav-user";
@@ -40,6 +41,8 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     const router = useRouter();
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const pathname = usePathname()
+    const activeId = pathname.split('/').pop()
 
     useEffect(() => {
         async function fetchConversations() {
@@ -153,7 +156,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             <Sidebar collapsible="none" className="hidden flex-1 md:flex">
                 <SidebarHeader className="gap-3.5 border-b border-[#313133] p-4">
                     <div className="flex w-full items-center justify-between">
-                        <div className="text-base font-medium text-white cursor-pointer" onClick={handleHomepageClick} >Yev dev</div>
+                        <div className="text-base font-medium text-white cursor-pointer" onClick={handleHomepageClick} >Yep dev</div>
                         {open && (
                             <SidebarTrigger className="-ml-1" onClick={() => setOpen(false)} />
                         )}
@@ -171,17 +174,23 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                                 ) : (
                                     <SidebarMenu>
                                         {conversations.map((conversation) => (
-                                            <SidebarMenuItem key={conversation.id}>
+                                            <SidebarMenuItem key={conversation.id} className="pt-1 pb-1 pl-3 pr-3">
                                                 <SidebarMenuButton
                                                     onClick={() => handleConversationClick(conversation.id)}
-                                                    className="w-full justify-start flex flex-col items-start"
+                                                    className={
+                                                        cn('justify-start flex flex-col items-start hover:bg-[#1a1a1c] active:bg-[#1a1a1c] active:text-white hover:text-white rounded-md p-1', {
+                                                            'bg-[#1a1a1c] rounded-md shadow-sm': activeId === conversation.id
+                                                        })
+                                                    }
                                                 >
-                                                    <span className="text-s pl-3">{conversation.title || 'Untitled Chat'}</span>
-                                                    {conversation.updatedAt && (
-                                                        <span className="text-xs text-gray-400 mt-1">
-                                                            Updated {formatDate(conversation.updatedAt)}
-                                                        </span>
-                                                    )}
+                                                    <div
+                                                        style={{
+                                                            overflow: 'hidden',
+                                                            textOverflow: 'ellipsis',
+                                                        }}
+                                                    >
+                                                        {conversation.title || 'Untitled Chat'}
+                                                    </div>
                                                 </SidebarMenuButton>
                                             </SidebarMenuItem>
                                         ))}

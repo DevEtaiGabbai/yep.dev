@@ -32,14 +32,11 @@ export async function saveFileToDB(
             cleanPath = cleanPath.substring(1);
         }
 
-        // Determine file size
         const size = new Blob([fileContent]).size;
 
-        // Determine MIME type based on file extension
         const extension = fileName.split('.').pop()?.toLowerCase();
         let mimeType = 'text/plain';
 
-        // Simple mapping of common extensions to MIME types
         const mimeMap: Record<string, string> = {
             'html': 'text/html',
             'css': 'text/css',

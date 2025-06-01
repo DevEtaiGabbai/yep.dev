@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import { motion } from 'framer-motion';
 import { User } from 'lucide-react';
+import Image from 'next/image';
 
 interface UserMessageProps {
   content: string | Array<{
@@ -46,9 +47,11 @@ const renderContent = (content: UserMessageProps['content']) => {
           
           return (
             <div key={index} className="mb-2">
-              <img 
+              <Image 
                 src={displayUrl} 
                 alt="Uploaded image" 
+                width={256}
+                height={256}
                 className="max-w-sm max-h-64 rounded-lg border border-[#313133]"
                 onLoad={() => console.log('Image loaded successfully:', displayUrl)}
                 onError={(e) => {

@@ -489,10 +489,10 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
 
     // Normalize the file path to prevent duplication of WORK_DIR
     let normalizedFilePath = filePath;
-    
+
     // Remove leading slash if present for normalization
     let pathForNormalization = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-    
+
     // Check if the path already contains the work directory structure
     if (pathForNormalization.startsWith('home/project/')) {
         // Path already has full work dir, just add leading slash
@@ -504,7 +504,7 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
         // Path is relative, prepend full WORK_DIR
         normalizedFilePath = path.join(WORK_DIR, pathForNormalization);
     }
-    
+
 
     const currentStore = $workbench.get();
     const currentFiles = currentStore.files;
@@ -515,10 +515,10 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
         path: normalizedFilePath,
         name: path.basename(normalizedFilePath),
         type: 'file',
-        content: content, // The new content
-        isBinary: false, // Assume text from AI for now
+        content: content,
+        isBinary: false,
         isLocked: fileEntry?.isLocked,
-        lockedByFolder: (fileEntry as WorkbenchFile)?.lockedByFolder, // Ensure type cast if needed
+        lockedByFolder: (fileEntry as WorkbenchFile)?.lockedByFolder,
     };
 
     // First update the store so UI shows the file immediately
@@ -565,7 +565,7 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
             }
 
             await wc.fs.writeFile(relativePath, content);
-            
+
             // Verify the file was written correctly
             try {
                 const writtenContent = await wc.fs.readFile(relativePath, 'utf-8');
@@ -576,7 +576,7 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
             } catch (verifyError) {
                 console.warn(`⚠️ WORKBENCH_STORE: Could not verify file write for ${relativePath}:`, verifyError);
             }
-            
+
             toast({ title: "File Created", description: `${path.basename(normalizedFilePath)} saved to virtual environment.` });
         } catch (error) {
             console.error(`WORKBENCH_STORE: Error writing file ${normalizedFilePath} to WebContainer:`, error);
@@ -603,10 +603,10 @@ export const addDirectoryToWorkbench = async (dirPath: string, wc?: WebContainer
 
     // Normalize the directory path to prevent duplication of WORK_DIR
     let normalizedDirPath = dirPath;
-    
+
     // Remove leading slash if present for normalization
     let pathForNormalization = dirPath.startsWith('/') ? dirPath.substring(1) : dirPath;
-    
+
     // Check if the path already contains the work directory structure
     if (pathForNormalization.startsWith('home/project/')) {
         // Path already has full work dir, just add leading slash

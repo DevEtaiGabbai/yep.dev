@@ -1,8 +1,5 @@
 "use client";
 
-import { usePromptEnhancer } from '@/hooks/usePromptEnhancer';
-// import { BaseChat } from './components/chat/BaseChat';
-// import { PROVIDER_LIST } from './utils/constants';
 import { useSession } from "next-auth/react";
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -11,7 +8,6 @@ export default function HomePage() {
   const router = useRouter();
   const { data: session, status } = useSession();
   const [prompt, setPrompt] = useState('');
-  const { enhancePrompt, enhancingPrompt } = usePromptEnhancer();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   // Auto-resize the textarea
@@ -28,15 +24,12 @@ export default function HomePage() {
   }, [prompt]);
 
   useEffect(() => {
-    // Wait for the session to be loaded
     if (status === "loading") return;
 
-    // If user is authenticated, redirect to dashboard
     if (session) {
       router.push("/chat");
 
     } else {
-      // If not authenticated, redirect to login
       router.push("/login");
     }
 
@@ -47,7 +40,7 @@ export default function HomePage() {
 
     <div className="flex min-h-screen items-center justify-center p-4 md:p-8 bg-[#101012]">
       <div className="text-center">
-        <h1 className="text-2xl font-bold mb-4">AI Chat Bot</h1>
+        <h1 className="text-2xl font-bold mb-4">Yep Chat Bot</h1>
         <p className="text-gray-500">Checking authentication...</p>
       </div>
     </div>

@@ -11,6 +11,20 @@ const s3Client = new S3Client({
   },
 });
 
+// Helper function to get signed URL for images
+async function getImageSignedUrl(key: string): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: process.env.S3_UPLOAD_BUCKET,
+    Key: key,
+  });
+
+  const signedUrl = await getSignedUrl(s3Client, command, {
+    expiresIn: 5 * 24 * 60 * 60, // URL valid for 5 days
+  });
+
+  return signedUrl;
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Check if required environment variables are set
@@ -71,17 +85,4 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
-
-export async function getImageSignedUrl(key: string): Promise<string> {
-  const command = new GetObjectCommand({
-    Bucket: process.env.S3_UPLOAD_BUCKET,
-    Key: key,
-  });
-
-  const signedUrl = await getSignedUrl(s3Client, command, {
-    expiresIn: 5 * 24 * 60 * 60, // URL valid for 5 days
-  });
-
-  return signedUrl;
 }

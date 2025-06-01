@@ -14,9 +14,9 @@ import {
 import { DEFAULT_PROVIDER } from "@/lib/provider";
 import { ModelInfo } from "@/lib/types";
 import Cookies from "js-cookie";
-import { ArrowUp, Image, Loader2, X } from "lucide-react";
-import { atom } from "nanostores";
+import { ArrowUp, Image as ImageIcon, Loader2, X } from "lucide-react";
 import { signOut, useSession } from "next-auth/react";
+import Image from 'next/image';
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useRef, useState } from "react";
@@ -25,7 +25,6 @@ import { APIKeyManager } from "./APIKeyManager";
 
 function Chat() {
   const { data: session, status } = useSession();
-  const expoUrlAtom = atom<string | null>(null);
   const [apiKeys, setApiKeys] = useState<Record<string, string>>();
   const [modelList, setModelList] = useState<ModelInfo[]>(
     DEFAULT_PROVIDER.staticModels
@@ -39,30 +38,13 @@ function Chat() {
   const [hasValidApiKey, setHasValidApiKey] = useState(false);
   const [isLoadingApiKey, setIsLoadingApiKey] = useState(true);
 
-  // const { providers, isLoading, error } = useProviders();
   const [model, setModel] = useState(() => {
     const savedModel = Cookies.get("selectedModel");
     return savedModel || "DEFAULT_MODEL";
   });
 
-  const [formData, setFormData] = useState({
-    name: "",
-    email: "",
-    password: "",
-    confirmPassword: "",
-  });
-
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      // let parsedApiKeys: Record<string, string> | undefined = {};
-
-      // try {
-      //   parsedApiKeys = { a: "getApiKeysFromCookies()" }
-      //   setApiKeys(parsedApiKeys);
-      // } catch (error) {
-      //   console.error('Error loading API keys from cookies:', error);
-      //   // Cookies.remove('apiKeys');
-      // }
 
       setIsModelLoading('all');
       fetch('/api/models')
@@ -80,39 +62,6 @@ function Chat() {
     }
   }, []);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
-  };
-
-  const onApiKeysChange = async (providerName: string, apiKey: string) => {
-    const newApiKeys = { ...apiKeys, [providerName]: apiKey };
-    setApiKeys(newApiKeys);
-    Cookies.set('apiKeys', JSON.stringify(newApiKeys));
-
-    setIsModelLoading(providerName);
-
-    let providerModels: ModelInfo[] = [];
-
-    try {
-      const response = await fetch(
-        `/api/models/${encodeURIComponent(providerName)}`
-      );
-      const data = await response.json();
-      providerModels = (data as { modelList: ModelInfo[] }).modelList;
-    } catch (error) {
-      console.error("Error loading dynamic models for:", providerName, error);
-    }
-
-    // Only update models for the specific provider
-    setModelList((prevModels) => {
-      const otherModels = prevModels.filter(
-        (model) => model.provider !== providerName
-      );
-      return [...otherModels, ...providerModels];
-    });
-    setIsModelLoading(undefined);
-  };
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const { enhancePrompt, enhancingPrompt } = usePromptEnhancer();
@@ -124,15 +73,6 @@ function Chat() {
     setHasValidApiKey(hasValidKey);
     setIsLoadingApiKey(false);
   };
-
-  // Set loading to false after a timeout as fallback
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setIsLoadingApiKey(false);
-    }, 3000);
-
-    return () => clearTimeout(timer);
-  }, []);
 
   const removeImage = (index: number) => {
     setUploadedImages(prev => prev.filter((_, i) => i !== index));
@@ -151,11 +91,9 @@ function Chat() {
     setIsStarterLoading(true);
 
     try {
-      // Prepare the message content - include images if any
       let messageContent: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>;
 
       if (uploadedImages.length > 0) {
-        // Create mixed content with text and images
         messageContent = [
           {
             type: 'text',
@@ -273,45 +211,20 @@ function Chat() {
 
           <div className="flex items-center gap-2 flex-col  mt-8">
             <div className="flex items-center gap-2">
-              <h1 className="text-3xl font-medium tracking-tight"> Build any apps with Yev</h1>
+              <h1 className="text-3xl font-medium tracking-tight"> Build any apps with Yep</h1>
               <Badge className="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border-0">
                 Beta
               </Badge>
             </div>
-            <p className="text-gray-400 text-lg">Yev builds complete, cross-platform web apps using AI.</p>
+            <p className="text-gray-400 text-lg">Yep builds complete, cross-platform web apps using AI.</p>
           </div>
         </div>
-
-        {/* API Key Configuration */}
-        {/* {!hasValidApiKey && (
-          <div className="border border-yellow-500/30 rounded-xl bg-yellow-900/10 p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle className="w-5 h-5 text-yellow-400" />
-              <h3 className="text-lg font-medium text-yellow-400">API Key Required</h3>
-            </div>
-            <p className="text-yellow-200/80 mb-4">
-              Please configure your OpenRouter API key to start building apps. Your key will be securely stored and used for AI model access.
-            </p>
-            {isLoadingApiKey ? (
-              <div className="flex items-center gap-2 text-gray-400">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Checking for existing API key...</span>
-              </div>
-            ) : (
-              <APIKeyManager
-                provider={DEFAULT_PROVIDER}
-                onApiKeyChange={handleApiKeyChange}
-              />
-            )}
-          </div>
-        )} */}
 
         {/* Main prompt area */}
         <div className="w-full pt-4">
           <form onSubmit={handleSubmit} className="border border-[#313133] rounded-xl bg-[#161618] shadow-sm p-3">
             <div className="pb-3">
               <ModelSelector
-                key={model}
                 model={model}
                 setModel={handleModelChange}
                 modelList={modelList}
@@ -332,9 +245,11 @@ function Chat() {
                   <div className="flex flex-wrap gap-2">
                     {uploadedImages.map((image, index) => (
                       <div key={index} className="relative group">
-                        <img
+                        <Image
                           src={image.url}
-                          alt={image.filename}
+                          alt={image.filename || 'Uploaded image'}
+                          width={80}
+                          height={80}
                           className="w-20 h-20 object-cover rounded border border-[#313133]"
                         />
                         <button
@@ -437,7 +352,7 @@ function Chat() {
                     {isUploading ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
                     ) : (
-                      <Image className="w-4 h-4" />
+                      <ImageIcon className="w-4 h-4" />
                     )}
                   </Button>
                   <button

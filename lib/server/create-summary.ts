@@ -59,8 +59,6 @@ ${(summary as any).summary}`;
     }
   }
 
-  console.debug('Sliced Messages:', slicedMessages.length);
-
   const extractTextContent = (message: Message) =>
     Array.isArray(message.content)
       ? (message.content.find((item) => item.type === 'text')?.text as string) || ''
@@ -137,10 +135,10 @@ Below is the chat after that:
 ---
 <new_chats>
 ${slicedMessages
-  .map((x) => {
-    return `---\n[${x.role}] ${extractTextContent(x)}\n---`;
-  })
-  .join('\n')}
+        .map((x) => {
+          return `---\n[${x.role}] ${extractTextContent(x)}\n---`;
+        })
+        .join('\n')}
 </new_chats>
 ---
 

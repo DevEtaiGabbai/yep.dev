@@ -6,11 +6,11 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { WebglAddon } from '@xterm/addon-webgl'; // For even better rendering performance, if available
 import { ITerminalOptions, ITheme, Terminal as XTerm } from '@xterm/xterm';
-import React, { forwardRef, memo, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
+import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 
 import { useWebContainer } from '@/hooks/useWebContainer'; // To interact with WebContainer
 import { cn } from '@/lib/utils';
-import { terminalActions } from '@/stores/terminal'; // Your terminal store
+import { terminalActions } from '@/stores/terminal';
 
 import { WebContainer, WebContainerProcess } from '@webcontainer/api';
 import '@xterm/xterm/css/xterm.css';
@@ -96,7 +96,7 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
     // Improved cleanup function
     const cleanupTerminal = useCallback(() => {
       console.log(`Terminal (${id}): Starting cleanup`);
-      
+
       // Abort any ongoing operations
       if (cleanupAbortControllerRef.current) {
         cleanupAbortControllerRef.current.abort();
@@ -269,8 +269,8 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
 
     // Improved shell spawning for standard terminals (non-bolt)
     useEffect(() => {
-      if (id === 'bolt' || !xtermRef.current || !webContainerInstance || 
-          shellProcessRef.current || !isMountedRef.current || isSpawningRef.current) {
+      if (id === 'bolt' || !xtermRef.current || !webContainerInstance ||
+        shellProcessRef.current || !isMountedRef.current || isSpawningRef.current) {
         return;
       }
 
@@ -317,9 +317,9 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
           const signal = cleanupAbortControllerRef.current.signal;
 
           localShellProcess.output.pipeTo(new WritableStream({
-            write(data) { 
+            write(data) {
               if (isMountedRef.current && term && !signal.aborted) {
-                term.write(data); 
+                term.write(data);
               }
             }
           }), { signal }).catch(err => {
@@ -344,7 +344,7 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
           if (!dataListenerSetupRef.current) {
             console.log(`Terminal (${id}): Setting up new data listener for session ${sessionIdRef.current}`);
             dataListenerSetupRef.current = true;
-            
+
             dataListenerDisposableRef.current = term.onData(data => {
               if (shellProcessRef.current === localShellProcess && isMountedRef.current && !signal.aborted) {
                 console.log(`Terminal (${id}): Received input data: "${data}" (session: ${sessionIdRef.current})`);
@@ -423,8 +423,8 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
 
     // Special handling for bolt terminal - use standard shell for now
     useEffect(() => {
-      if (id !== 'bolt' || !xtermRef.current || !webContainerInstance || 
-          shellProcessRef.current || !isMountedRef.current || isSpawningRef.current) {
+      if (id !== 'bolt' || !xtermRef.current || !webContainerInstance ||
+        shellProcessRef.current || !isMountedRef.current || isSpawningRef.current) {
         return;
       }
 
@@ -473,9 +473,9 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
           const signal = cleanupAbortControllerRef.current.signal;
 
           localShellProcess.output.pipeTo(new WritableStream({
-            write(data) { 
+            write(data) {
               if (isMountedRef.current && term && !signal.aborted) {
-                term.write(data); 
+                term.write(data);
               }
             }
           }), { signal }).catch(err => {
@@ -500,7 +500,7 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
           if (!dataListenerSetupRef.current) {
             console.log(`Terminal (${id}): Setting up new data listener for session ${sessionIdRef.current}`);
             dataListenerSetupRef.current = true;
-            
+
             dataListenerDisposableRef.current = term.onData(data => {
               if (shellProcessRef.current === localShellProcess && isMountedRef.current && !signal.aborted) {
                 console.log(`Terminal (${id}): Received input data: "${data}" (session: ${sessionIdRef.current})`);

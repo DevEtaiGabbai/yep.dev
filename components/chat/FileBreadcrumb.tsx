@@ -1,4 +1,3 @@
-// components/FileBreadcrumb.tsx
 'use client';
 
 import { WORK_DIR } from "@/lib/prompt";
@@ -6,7 +5,7 @@ import { ChevronRight } from "lucide-react";
 
 interface FileBreadcrumbProps {
     pathSegments: string[];
-    onFileSelect: (path: string) => void; // Assuming this is how you handle navigation
+    onFileSelect: (path: string) => void;
 }
 
 export function FileBreadcrumb({ pathSegments, onFileSelect }: FileBreadcrumbProps) {
@@ -14,18 +13,9 @@ export function FileBreadcrumb({ pathSegments, onFileSelect }: FileBreadcrumbPro
         return <span className="text-xs text-[#969798]">No file selected</span>;
     }
 
-    // Construct full path for each segment for onFileSelect
     const handleClick = (index: number) => {
-        // Reconstruct path up to the clicked segment
-        // This logic needs to be robust based on how your paths are stored/expected
-        const pathClicked = pathSegments.slice(0, index + 1).join('/');
-        // If your paths in the store are absolute (e.g., /home/project/...)
-        // you might need to prepend WORK_DIR or similar logic.
-        // For simplicity, assuming onFileSelect can handle relative or specific paths.
-        // This example assumes pathSegments already form a relative path from some root.
-        // Or if your store uses full paths:
         const fullPath = WORK_DIR + '/' + pathSegments.slice(1).slice(0, index + 1).join('/');
-        onFileSelect(fullPath); // Adjust this if onFileSelect expects a different path format
+        onFileSelect(fullPath);
     };
 
     return (

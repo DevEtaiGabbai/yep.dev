@@ -6,8 +6,7 @@ import { motion } from 'framer-motion';
 import { BookDashed, Brain, MessageSquare, WrapText } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
-// Helper function to extract text content from mixed content types
-const getTextContent = (content: string | Array<{type: 'text' | 'image_url'; text?: string; image_url?: {url: string}}>): string => {
+const getTextContent = (content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>): string => {
   if (typeof content === 'string') {
     return content;
   }
@@ -37,17 +36,8 @@ interface AssistantMessageProps {
 // Helper function to process content with bolt artifacts and actions
 const processContent = (content: string): { beforeBolt: string; afterBolt: string } => {
   const result = { beforeBolt: '', afterBolt: '' };
+  let cleanContent = content.trim();
 
-  // The content received here should already be clean of SSE prefixes.
-  // The main task is to separate narrative from Bolt tags.
-
-  let cleanContent = content.trim(); // Start with a trim.
-
-  // IMPORTANT FIX: Instead of splitting content and removing bolt tags,
-  // we'll preserve all content to ensure code examples remain visible
-  // This addresses the issue where code disappears after streaming
-
-  // Just set beforeBolt to the entire content to preserve everything
   result.beforeBolt = cleanContent;
   result.afterBolt = '';
 
@@ -157,14 +147,11 @@ export const AssistantMessage = ({
   completedCommands,
   progress = []
 }: AssistantMessageProps) => {
-  // Use useMemo instead of useState + useEffect to prevent infinite loops
   const displayContent = useMemo(() => {
     if (!content) return null;
 
-    // Extract text content for processing
     const textContent = getTextContent(content);
 
-    // Clean the content of any SSE markers or raw token artifacts
     // Store original clean content for reference during streaming
     const rawContent = textContent
       // First remove SSE specifics that might appear in the completed message
@@ -177,8 +164,6 @@ export const AssistantMessage = ({
 
     // Extract content before and after bolt artifacts
     const { beforeBolt, afterBolt } = processContent(rawContent);
-
-    // Return the display content
     return (
       <div className="flex flex-col w-full gap-2">
         {/* Text before the bolt artifact */}
@@ -189,9 +174,6 @@ export const AssistantMessage = ({
           />
         )}
 
-        {/* File and command updates - only show if we have any status to display
-           Note: we pass isStreaming but the presence of completed files/commands should
-           not depend on streaming status */}
         {(activeFile || (completedFiles && completedFiles.size > 0) ||
           activeCommand || (completedCommands && completedCommands.size > 0)) && (
             <Markdown
@@ -227,7 +209,6 @@ export const AssistantMessage = ({
           <MessageSquare className="w-3.5 h-3.5 text-[#969798]" />
         </div>
         <div className="flex-1 text-[#f3f6f6] overflow-hidden break-words whitespace-pre-wrap overflow-wrap-anywhere">
-          {/* Show progress indicator when streaming but no content yet */}
           {isStreaming && !content && (
             <AiStreamState isStreaming={isStreaming} progress={progress} />
           )}

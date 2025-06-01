@@ -22,7 +22,6 @@ export function LockManager() {
     const handleUnlock = (path: string, isFolder: boolean) => {
         // Placeholder: In a real app, call your store's unlockFile/unlockFolder action
         console.log(`Request to unlock ${isFolder ? 'folder' : 'file'}: ${path}`);
-        // Example: workbenchStore.unlockItem(path, isFolder); // You'd need to implement this in your store
     };
 
     if (lockedItems.length === 0) {
