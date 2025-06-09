@@ -1,4 +1,5 @@
 import { authOptions } from "@/lib/auth";
+import { MAX_FREE_PROJECT } from "@/lib/constants";
 import { db } from "@/lib/db";
 import { getServerSession } from "next-auth";
 import { NextRequest, NextResponse } from "next/server";
@@ -56,6 +57,30 @@ export async function POST(req: NextRequest) {
 
         const body = await req.json();
         const { name, description } = projectSchema.parse(body);
+
+        // Check subscription status and project limit for free users
+        const user = await db.user.findUnique({
+            where: { id: session.user.id },
+            include: {
+                projects: true
+            }
+        });
+
+        if (!user) {
+            return NextResponse.json({ error: 'User not found' }, { status: 404 });
+        }
+
+        // If user is not subscribed and has 5 or more projects, deny creation
+        if (!user.isSubscribed && user.projects.length >= MAX_FREE_PROJECT) {
+            return NextResponse.json(
+                {
+                    error: 'Project limit reached',
+                    message: 'Free users can create up to 5 projects. Upgrade to Pro for unlimited projects.',
+                    requiresUpgrade: true
+                },
+                { status: 403 }
+            );
+        }
 
         // Create the project
         const project = await db.project.create({

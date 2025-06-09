@@ -168,8 +168,8 @@ const FileUpdatesPanel = memo(({
   const completedFilesArray = completedFiles ? Array.from(completedFiles) : [];
   const completedCommandsArray = completedCommands ? Array.from(completedCommands) : [];
 
-  // Modified condition: always show the panel when there are completed files/commands
-  // regardless of streaming state
+  // Show the panel if there are any active operations OR completed files/commands
+  // Don't show if streaming with no files/commands
   if (!activeFile && completedFilesArray.length === 0 && !activeCommand && completedCommandsArray.length === 0) {
     return null;
   }
@@ -187,7 +187,18 @@ const FileUpdatesPanel = memo(({
           >
             <Check className="h-4 w-4 mr-2 text-blue-400 flex-shrink-0" />
             <span className="text-[#f3f6f6] break-all">
-              Updated <span className="text-blue-400 font-mono">{filePath}</span>
+              Updated{' '}
+              <button
+                onClick={() => {
+                  import('@/app/lib/stores/workbenchStore').then(({ setSelectedFile, setWorkbenchView }) => {
+                    setSelectedFile(filePath);
+                    setWorkbenchView('Editor');
+                  });
+                }}
+                className="text-blue-400 font-mono hover:text-blue-300 underline hover:no-underline transition-all cursor-pointer"
+              >
+                {filePath.replace('/home/project/', '').replace(/^\//, '')}
+              </button>
             </span>
           </div>
         ))}
@@ -198,7 +209,10 @@ const FileUpdatesPanel = memo(({
           >
             <Loader2 className="h-4 w-4 mr-2 text-blue-400 animate-spin flex-shrink-0" />
             <span className="text-[#f3f6f6] break-all">
-              Updating <span className="text-blue-400 font-mono">{activeFile}</span>
+              Updating{' '}
+              <span className="text-blue-400 font-mono">
+                {activeFile.replace('/home/project/', '').replace(/^\//, '')}
+              </span>
             </span>
           </div>
         )}
@@ -324,46 +338,20 @@ const prepareBoltContentForDisplay = (content: string) => {
     cleanedContent = cleanedContent.replace(/\n+```\s*$/, '');
   }
 
-  // Count tags before processing
-  const fileActionTagsBefore = (cleanedContent.match(/<boltAction\s+type="file"/g) || []).length;
-  const shellActionTagsBefore = (cleanedContent.match(/<boltAction\s+type="(command|shell)"/g) || []).length;
-
-  if (fileActionTagsBefore > 0) {
-    const fileActionRegex = /<boltAction\s+type="file"\s+filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g;
-    let match;
-    let index = 0;
-
-    while ((match = fileActionRegex.exec(cleanedContent)) !== null) {
-      const [fullMatch, filePath, fileContent] = match;
-      console.log(`[Markdown] File Action #${++index}:`, {
-        filePath,
-        contentLength: fileContent.length,
-        matchStart: match.index,
-        matchEnd: match.index + fullMatch.length
-      });
-    }
-  }
-
   const processed = cleanedContent
     // First handle boltAction tags (file content)
     .replace(/<boltAction\s+type="file"\s+filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g,
       (match, filePath, code) => {
-        console.log(`[Markdown] Converting file action to code block: ${filePath} (${code.length} chars)`);
         return `\n\n\`\`\`${getLanguageFromFilePath(filePath)}\n${he.decode(code.trim())}\n\`\`\`\n\n`;
       })
     // Handle other boltAction tags (commands, etc)
     .replace(/<boltAction\s+type="(command|shell)"[^>]*>([\s\S]*?)<\/boltAction>/g,
       (match, type, command) => {
-        console.log(`[Markdown] Converting ${type} action to bash block: ${command.substring(0, 30)}...`);
         return `\n\n\`\`\`bash\n${he.decode(command.trim())}\n\`\`\`\n\n`;
       })
     // Clean up any remaining boltAction/boltArtifact tags
     .replace(/<\/?boltArtifact[^>]*>/g, '')
     .replace(/<\/?boltAction[^>]*>/g, '');
-
-  // Count code blocks after processing
-  const codeBlocks = (processed.match(/```/g) || []).length / 2;
-  console.log(`[Markdown] Final processed content has ${codeBlocks} code blocks`);
 
   return processed;
 };
@@ -403,25 +391,6 @@ export const Markdown = memo(({
   useEffect(() => {
     if (content !== rawContentRef.current) {
       rawContentRef.current = content;
-      if (content.includes('<boltAction')) {
-
-        // Dispatch custom event
-        const event = new CustomEvent('boltActionsDetected', {
-          detail: { content, timestamp: Date.now() }
-        });
-        window.dispatchEvent(event);
-
-        // Also post message to parent window for backup handling
-        try {
-          window.parent.postMessage({
-            type: 'boltActionsDetected',
-            content,
-            timestamp: Date.now()
-          }, '*');
-        } catch (err) {
-          console.error('[Markdown] Error posting message:', err);
-        }
-      }
     }
   }, [content]);
 
@@ -448,13 +417,6 @@ export const Markdown = memo(({
       data-has-actions={hasBoltActionTags}
     >
       {artifactTitle && <ArtifactTitle title={artifactTitle} />}
-      <FileUpdatesPanel
-        activeFile={activeFile}
-        completedFiles={completedFiles}
-        activeCommand={activeCommand}
-        completedCommands={completedCommands}
-        isStreaming={isStreaming}
-      />
 
       <div className="break-words overflow-wrap-anywhere whitespace-pre-wrap">
         <ReactMarkdown
@@ -521,6 +483,13 @@ export const Markdown = memo(({
           {displayContent}
         </ReactMarkdown>
       </div>
+      <FileUpdatesPanel
+        activeFile={activeFile}
+        completedFiles={completedFiles}
+        activeCommand={activeCommand}
+        completedCommands={completedCommands}
+        isStreaming={isStreaming}
+      />
     </div>
   );
 });

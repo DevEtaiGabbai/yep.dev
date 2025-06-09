@@ -6,8 +6,6 @@ import he from 'he';
 import { decode as base64Decode } from 'js-base64';
 import { twMerge } from 'tailwind-merge';
 import { FileEntry } from '../types';
-import { GITHUB_API_BASE_URL } from './constants';
-
 // Define types locally since they aren't exported from types file
 export interface GitHubFile {
   name: string;
@@ -33,166 +31,7 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export const extractRepoName = (url: string): string | null => {
-  // Handle different GitHub URL formats
-  // 1. https://github.com/username/repo
-  // 2. https://github.com/username/repo.git
-  // 3. git@github.com:username/repo.git
-  // 4. username/repo (already in correct format)
 
-  try {
-    // If it's already in the format 'username/repo' or 'username/repo.git'
-    if (/^[^\/]+\/[^\/]+$/.test(url) || /^[^\/]+\/[^\/]+\.git$/.test(url)) {
-      return url.replace(/\.git$/, '');
-    }
-
-    // Standard https GitHub URL
-    const httpsMatch = url.match(/github\.com\/([^/]+\/[^/]+?)(?:\.git)?(?:\/)?$/);
-    if (httpsMatch && httpsMatch[1]) {
-      return httpsMatch[1];
-    }
-
-    // SSH GitHub URL
-    const sshMatch = url.match(/git@github\.com:([^/]+\/[^/]+?)(?:\.git)?$/);
-    if (sshMatch && sshMatch[1]) {
-      return sshMatch[1];
-    }
-
-    console.error(`Failed to extract repo name from URL: ${url}`);
-    return null;
-  } catch (error) {
-    console.error(`Error extracting repo name from URL: ${url}`, error);
-    return null;
-  }
-};
-
-export const getGitHubRepoContent = async (
-  repoName: string,
-  path: string = '',
-): Promise<GitHubFile[]> => {
-  const baseUrl = GITHUB_API_BASE_URL;
-  try {
-    // Use GitHub token if available (increases rate limit from 60 to 5000 requests/hour)
-    const token = process.env.NEXT_PUBLIC_GITHUB_ACCESS_TOKEN;
-    const headers: HeadersInit = {
-      Accept: 'application/vnd.github.v3+json',
-    };
-
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-
-    // Log rate limit info when available
-    const logRateLimits = (response: Response) => {
-      const remaining = response.headers.get('x-ratelimit-remaining');
-      const limit = response.headers.get('x-ratelimit-limit');
-      const reset = response.headers.get('x-ratelimit-reset');
-
-      if (remaining && limit) {
-        const resetTime = reset ? new Date(parseInt(reset) * 1000).toLocaleTimeString() : 'unknown';
-        // console.log(`GitHub API Rate Limit: ${remaining}/${limit} remaining. Resets at ${resetTime}`);
-
-        // Warn if getting low on requests
-        if (parseInt(remaining) < 10) {
-          console.warn(`⚠️ GitHub API rate limit getting low: ${remaining}/${limit} remaining`);
-        }
-      }
-    };
-
-    // Fetch the content of the current path
-    const response = await fetch(`${baseUrl}/repos/${repoName}/contents/${path}`, {
-      headers,
-    });
-
-    // Check for rate limiting
-    logRateLimits(response);
-
-    if (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0') {
-      const resetTime = response.headers.get('x-ratelimit-reset');
-      const resetDate = resetTime ? new Date(parseInt(resetTime) * 1000).toLocaleTimeString() : 'unknown time';
-      throw new Error(`GitHub API rate limit exceeded. Resets at ${resetDate}`);
-    }
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(
-        `GitHub API error! Status: ${response.status}. Message: ${errorData.message || 'Unknown error'}`
-      );
-    }
-
-    const data: any = await response.json();
-
-    // Handle single file response
-    if (!Array.isArray(data)) {
-      if (data.type === 'file') {
-        // For files, we need to get the content from the "content" field (base64 encoded)
-        let content = '';
-        if (data.content) {
-          content = base64Decode(data.content);
-        } else if (data.git_url) {
-          // Fallback to blob API if content is not included
-          const blobResponse = await fetch(data.git_url, { headers });
-          logRateLimits(blobResponse);
-
-          if (blobResponse.ok) {
-            const blobData = await blobResponse.json();
-            if (blobData.content) {
-              content = base64Decode(blobData.content);
-            }
-          }
-        }
-        return [{ name: data.name, path: data.path, content }];
-      }
-      return [];
-    }
-
-    // Process directories and files, but introduce a delay to avoid rate limiting
-    const contents: GitHubFile[] = [];
-
-    // Process items with a small delay between each to prevent rate limiting
-    for (const item of data) {
-      if (item.type === 'dir') {
-        // Add delay before recursive API calls
-        await new Promise(resolve => setTimeout(resolve, 100));
-        const dirContents = await getGitHubRepoContent(repoName, item.path);
-        contents.push(...dirContents);
-      } else if (item.type === 'file') {
-        // For files, use the contents API directly instead of download_url
-        let fileContent = '';
-
-        // Small files (<1MB) will have content field directly
-        if (item.size < 1000000 && item.url) {
-          // Add delay for each file request
-          await new Promise(resolve => setTimeout(resolve, 50));
-
-          try {
-            const fileResponse = await fetch(item.url, { headers });
-            logRateLimits(fileResponse);
-
-            if (fileResponse.ok) {
-              const fileData = await fileResponse.json();
-              if (fileData.content) {
-                fileContent = base64Decode(fileData.content);
-              }
-            }
-          } catch (fetchError: any) {
-            console.warn(`Error fetching content for ${item.path}: ${fetchError.message}`);
-          }
-        } else {
-          // For larger files, note that they're too large
-          fileContent = `// File too large to fetch automatically (${Math.round(item.size / 1024)}KB)\n// Edit this file to load its content.`;
-        }
-
-        contents.push({ name: item.name, path: item.path, content: fileContent });
-      }
-    }
-
-    return contents;
-  } catch (error: any) {
-    console.error(`Error fetching repo contents for ${repoName}/${path}:`, error);
-    throw error;
-  }
-};
 
 const generateTextTree = (tree: FileSystemTree, prefix = ''): string => {
   const entries = Object.entries(tree);
@@ -220,19 +59,7 @@ export interface AIContextData {
   files: Record<string, FileEntry>;
 }
 
-export const transformGitHubFilesToState = (files: GitHubFile[]) => {
-  const fileState: Record<string, { name: string; content: string; type: 'file' }> = {};
-  files.forEach(file => {
-    fileState[file.path] = {
-      name: file.path,
-      content: file.content,
-      type: 'file',
-    };
-  });
-  return fileState;
-};
-
-// New function to create WebContainer-mountable file system
+// Function to create WebContainer-mountable file system
 export const createMountableFileSystem = (
   filesInput: GitHubFile[] | Record<string, FileEntry> | Record<string, { name: string; content: string; type: string }>
 ): Record<string, any> => {
@@ -246,7 +73,7 @@ export const createMountableFileSystem = (
       path: file.path,
       content: file.content
     }));
-    console.log(`Processing ${processedFiles.length} files from GitHub`);
+    console.log(`Processing ${processedFiles.length} files from templates`);
   } else {
     processedFiles = Object.entries(filesInput).map(([path, fileEntry]) => ({
       path,

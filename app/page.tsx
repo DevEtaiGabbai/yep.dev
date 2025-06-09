@@ -1,48 +1,577 @@
 "use client";
 
-import { useSession } from "next-auth/react";
-import { useRouter } from 'next/navigation';
-import { useEffect, useRef, useState } from 'react';
+import { AuthenticatedLayout } from "@/components/layouts/AuthenticatedLayout";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Icons } from "@/components/ui/icons";
+import { Textarea } from "@/components/ui/textarea";
+import { UploadedImage, useImageUpload } from "@/hooks/useImageUpload";
+import { usePromptEnhancer } from "@/hooks/usePromptEnhancer";
+import { getAllApiKeysFromStorage } from "@/lib/api-keys";
+import {
+  DEFAULT_MODEL,
+  DEFAULT_TEMPLATE,
+  STARTER_TEMPLATES
+} from "@/lib/constants";
+import { DEFAULT_PROVIDER } from "@/lib/provider";
+import { ModelInfo } from "@/lib/types";
+import { cn } from "@/lib/utils";
+import Cookies from "js-cookie";
+import { ArrowUp, Image as ImageIcon, Loader2, X } from "lucide-react";
+import { signOut, useSession } from "next-auth/react";
+import Image from 'next/image';
+import { useRouter } from "next/navigation";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { APIKeyManager } from "../components/APIKeyManager";
+import { ModelSelector } from "./components/chat/ModelSelector";
+import { UpgradeDialog } from "./components/UpgradeDialog";
 
-export default function HomePage() {
-  const router = useRouter();
+
+function Chat() {
   const { data: session, status } = useSession();
-  const [prompt, setPrompt] = useState('');
+  const [apiKeys, setApiKeys] = useState<Record<string, string>>();
+  const [modelList, setModelList] = useState<ModelInfo[]>(
+    DEFAULT_PROVIDER.staticModels
+  );
+  const [showingError, setShowingError] = useState(false);
+  const { uploadImage, uploadFromClipboard, isUploading, uploadError, clearError } = useImageUpload();
+  const [isModelLoading, setIsModelLoading] = useState<string | undefined>(
+    "all"
+  );
+  const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
+  const [hasValidApiKey, setHasValidApiKey] = useState(false);
+  const [isLoadingApiKey, setIsLoadingApiKey] = useState(true);
+  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
+  const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const savedWebSearch = Cookies.get("webSearchEnabled");
+      return savedWebSearch === "true";
+    }
+    return false;
+  });
+
+  const [model, setModel] = useState(() => {
+    const savedModel = Cookies.get("selectedModel");
+    return savedModel || DEFAULT_MODEL;
+  });
+
+  // Check for returnPrompt URL parameter and pre-fill prompt
+  const [prompt, setPrompt] = useState("");
+  const { enhancePrompt, enhancingPrompt } = usePromptEnhancer();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-
-  // Auto-resize the textarea
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-
-    // Reset height to auto to get the correct scrollHeight
-    textarea.style.height = 'auto';
-
-    // Set new height based on content (with a min of 44px)
-    const newHeight = Math.max(44, Math.min(textarea.scrollHeight, 250));
-    textarea.style.height = `${newHeight}px`;
-  }, [prompt]);
+  const [isStarterLoading, setIsStarterLoading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (status === "loading") return;
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const returnPrompt = urlParams.get('returnPrompt');
+      if (returnPrompt && !prompt) {
+        setPrompt(decodeURIComponent(returnPrompt));
+        // Clean up URL by removing the parameter
+        const url = new URL(window.location.href);
+        url.searchParams.delete('returnPrompt');
+        window.history.replaceState({}, document.title, url.pathname);
+      }
+    }
+  }, [status, prompt]);
 
-    if (session) {
-      router.push("/chat");
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
 
-    } else {
-      router.push("/login");
+      setIsModelLoading('all');
+      fetch('/api/models')
+        .then((response) => response.json())
+        .then((data) => {
+          const typedData = data as { modelList: ModelInfo[] };
+          setModelList(typedData.modelList);
+        })
+        .catch((error) => {
+          console.error("Error fetching model list:", error);
+        })
+        .finally(() => {
+          setIsModelLoading(undefined);
+        });
+    }
+  }, []);
+
+  const router = useRouter();
+
+  // Load API keys from localStorage
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const keys = getAllApiKeysFromStorage(session?.user?.id || null);
+      setApiKeys(keys);
+    }
+  }, [session?.user?.id]);
+
+  const handleApiKeyChange = useCallback((hasValidKey: boolean) => {
+    setHasValidApiKey(hasValidKey);
+    setIsLoadingApiKey(false);
+
+    // Reload API keys when they change
+    if (typeof window !== 'undefined') {
+      const keys = getAllApiKeysFromStorage(session?.user?.id || null);
+      setApiKeys(keys);
+    }
+  }, [session?.user?.id]);
+
+  const removeImage = (index: number) => {
+    setUploadedImages(prev => prev.filter((_, i) => i !== index));
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    const trimmedPrompt = prompt.trim();
+    if (!trimmedPrompt) return;
+
+    // Check if user is authenticated before checking API key
+    if (status !== "authenticated" || !session) {
+      // Redirect to login with the prompt as a parameter
+      const encodedPrompt = encodeURIComponent(trimmedPrompt);
+      router.push(`/login?returnPrompt=${encodedPrompt}`);
+      return;
     }
 
-  }, [session, status, router]);
+    if (!hasValidApiKey) {
+      alert("Please configure your OpenRouter API key first.");
+      return;
+    }
 
-  // Show a loading state while checking authentication
-  return (
+    setIsStarterLoading(true);
 
-    <div className="flex min-h-screen items-center justify-center p-4 md:p-8 bg-[#101012]">
-      <div className="text-center">
-        <h1 className="text-2xl font-bold mb-4">Yep Chat Bot</h1>
-        <p className="text-gray-500">Checking authentication...</p>
+    try {
+      let messageContent: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>;
+
+      if (uploadedImages.length > 0) {
+        messageContent = [
+          {
+            type: 'text',
+            text: trimmedPrompt
+          },
+          ...uploadedImages.map(image => ({
+            type: 'image_url' as const,
+            image_url: {
+              url: image.signUrl
+            }
+          }))
+        ];
+      } else {
+        messageContent = trimmedPrompt;
+      }
+
+      // Create a new conversation in the database
+      const response = await fetch('/api/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: trimmedPrompt.substring(0, 50) + (trimmedPrompt.length > 50 ? '...' : ''),
+          initialMessage: messageContent,
+          templateName: DEFAULT_TEMPLATE.name,
+          sendFirst: true,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        if (errorData.requiresUpgrade) {
+          setShowUpgradeDialog(true);
+          setIsStarterLoading(false);
+          return;
+        }
+        console.error("Failed to start chat:", errorData.error || 'Unknown error');
+        setIsStarterLoading(false);
+        return;
+      }
+
+      const { conversation } = await response.json();
+      if (!conversation || !conversation.id) {
+        console.error("API did not return a valid conversation object.");
+        setIsStarterLoading(false);
+        return;
+      }
+
+      // Clean URL - only include conversation ID
+      router.push(`/chat/${conversation.id}`);
+    } catch (error) {
+      console.error('Error initiating chat:', error);
+    } finally {
+      setIsStarterLoading(false);
+      setPrompt('');
+      setUploadedImages([]);
+    }
+  };
+
+
+  const examplePrompts = [
+    "A todo app with React and TypeScript",
+    "E-commerce dashboard with Next.js",
+    "Blog with Astro and Tailwind",
+    "Chat app with React and Firebase",
+    "Job board with Express and MongoDB",
+  ];
+
+  const handleModelChange = (newModel: string) => {
+    const baseModel = newModel.replace(':online', '');
+    setModel(baseModel);
+    Cookies.set("selectedModel", baseModel, { expires: 30 });
+  };
+
+  const handleLogout = async () => {
+    await signOut({
+      redirect: true,
+      callbackUrl: "/login"
+    });
+
+  };
+
+  const handleUploadImage = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    clearError();
+    const uploadedImage = await uploadImage(file);
+    if (uploadedImage) {
+      setUploadedImages(prev => [...prev, uploadedImage]);
+    }
+
+    // Reset the input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleTemplateClick = async (template: any) => {
+    // Check if user is authenticated before checking API key
+    if (status !== "authenticated" || !session) {
+      router.push("/login");
+      return;
+    }
+
+    if (!hasValidApiKey) {
+      alert("Please configure your OpenRouter API key first.");
+      return;
+    }
+
+    setIsStarterLoading(true);
+
+    try {
+      // Create a new conversation with the selected template
+      const response = await fetch('/api/conversations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: `New ${template.label} Project`,
+          templateName: template.name,
+          sendFirst: false, // Don't auto-send for template starters
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        if (errorData.requiresUpgrade) {
+          setShowUpgradeDialog(true);
+          setIsStarterLoading(false);
+          return;
+        }
+        console.error("Failed to start template project:", errorData.error || 'Unknown error');
+        setIsStarterLoading(false);
+        return;
+      }
+
+      const { conversation } = await response.json();
+      if (!conversation || !conversation.id) {
+        console.error("API did not return a valid conversation object.");
+        setIsStarterLoading(false);
+        return;
+      }
+
+      // Navigate to the clean conversation URL
+      router.push(`/chat/${conversation.id}`);
+    } catch (error) {
+      console.error('Error creating template project:', error);
+    } finally {
+      setIsStarterLoading(false);
+    }
+  };
+
+  const toggleWebSearch = () => {
+    const newWebSearchEnabled = !webSearchEnabled;
+    setWebSearchEnabled(newWebSearchEnabled);
+    Cookies.set("webSearchEnabled", String(newWebSearchEnabled), { expires: 365 });
+      };
+
+    return (
+    <div className="min-h-screen bg-[#101012] text-white">
+      <header className="flex justify-end items-center p-3">
+        {
+          status === "authenticated" && (
+            <div className="flex items-center gap-4">
+              <div className="text-sm">{session?.user?.email}</div>
+              <Button
+                className="border border-[#313133] rounded-xl bg-[#161618] shadow-sm p-3"
+                variant="outline"
+                onClick={handleLogout}
+              >
+                Sign Out
+              </Button>
+            </div>
+          )
+        }
+      </header >
+
+      <div className="max-w-4xl mx-auto px-6 py-8 flex flex-col gap-12">
+        {/* Header */}
+        <div className="space-y-2">
+
+          <div className="flex items-center gap-2 flex-col  mt-8">
+            <div className="flex items-center gap-2">
+              <h1 className="text-3xl font-medium tracking-tight"> Build any apps with Yep</h1>
+              <Badge className="bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 border-0">
+                Beta
+              </Badge>
+            </div>
+            <p className="text-gray-400 text-lg">Yep builds complete, cross-platform web apps using AI.</p>
+          </div>
+        </div>
+
+        {/* Main prompt area */}
+        <div className="w-full pt-4">
+          <form onSubmit={handleSubmit} className="border border-[#313133] rounded-xl bg-[#161618] shadow-sm p-3">
+            <div className="pb-3">
+              <ModelSelector
+                model={model}
+                setModel={handleModelChange}
+                modelList={modelList}
+                apiKeys={apiKeys}
+                modelLoading={isModelLoading}
+              />
+            </div>
+
+            {hasValidApiKey ? <></> : <APIKeyManager
+              provider={DEFAULT_PROVIDER}
+              onApiKeyChange={handleApiKeyChange}
+              userId={session?.user?.id || null}
+            />}
+
+            <div className="border border-[#313133] rounded-xl bg-[#161618] shadow-sm">
+              {/* Image preview area */}
+              {uploadedImages.length > 0 && (
+                <div className="mb-3 p-3 bg-[#1a1a1c] rounded-lg border border-[#313133]">
+                  <div className="flex flex-wrap gap-2">
+                    {uploadedImages.map((image, index) => (
+                      <div key={index} className="relative group">
+                        <Image
+                          src={image.url}
+                          alt={image.filename || 'Uploaded image'}
+                          width={80}
+                          height={80}
+                          className="w-20 h-20 object-cover rounded border border-[#313133]"
+                        />
+                        <button
+                          onClick={() => removeImage(index)}
+                          className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-xs p-1 rounded-b truncate">
+                          {image.filename}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Upload error display */}
+              {uploadError && (
+                <div className="mb-3 p-2 bg-red-900/20 border border-red-500/30 rounded text-red-400 text-sm">
+                  {uploadError}
+                </div>
+              )}
+
+              <div className="p-3 relative">
+                <Textarea
+                  ref={textareaRef}
+                  placeholder="An app that helps me plan my day"
+                  value={prompt}
+                  onChange={(e) => setPrompt(e.target.value)}
+                  onPaste={async (event) => {
+                    const items = event.clipboardData?.items;
+                    if (!items) return;
+
+                    for (const item of Array.from(items)) {
+                      if (item.type.startsWith('image/')) {
+                        event.preventDefault();
+                        clearError();
+
+                        const file = item.getAsFile();
+                        if (file) {
+                          const uploadedImage = await uploadImage(file);
+                          if (uploadedImage) {
+                            setUploadedImages(prev => [...prev, uploadedImage]);
+                          }
+                        }
+                        break;
+                      }
+                    }
+                  }}
+                  className="min-h-[56px] max-h-[250px] resize-none border-0 p-0 bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-gray-500 text-sm pr-12 overflow-y-auto"
+                  translate="no"
+                  style={{
+                    transition: "height 0.1s ease",
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      handleSubmit(e);
+                    }
+                  }}
+                />
+                {(prompt.length > 0 || isStarterLoading) && (
+                  <div className="absolute top-3 right-3">
+                    <Button
+                      type="submit"
+                      size="icon"
+                      className="h-10 w-10 rounded-full bg-blue-500 hover:bg-blue-600"
+                      disabled={isStarterLoading || enhancingPrompt || !prompt.trim()}
+                    >
+                      {isStarterLoading ? (
+                        <Icons.spinner className="w-5 h-5 text-[#101012] animate-spin" />
+                      ) : (
+                        <ArrowUp className="w-5 h-5 text-[#101012]" />
+                      )}
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              {/* Hidden file input */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+
+              <div className="flex justify-start p-3 mt-4">
+                <div className="flex items-center gap-3">
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    className="h-8 w-8 text-[#969798] hover:text-[#f3f6f6] hover:bg-[#212122]"
+                    disabled={showingError || isUploading}
+                    onClick={handleUploadImage}
+                  >
+                    {isUploading ? (
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                    ) : (
+                      <ImageIcon className="w-4 h-4" />
+                    )}
+                  </Button>
+                  <button
+                    type="button"
+                    className="text-gray-400 hover:text-gray-300 transition-colors cursor-pointer disabled:opacity-50"
+                    onClick={() =>
+                      enhancePrompt(prompt, setPrompt, model)
+                    }
+                    disabled={enhancingPrompt || prompt.length === 0}
+                  >
+                    <Icons.sparkles
+                      className={`w-4 h-4 ${enhancingPrompt ? "animate-pulse" : ""
+                        }`}
+                    />
+                  </button>
+                  <button
+                    type="button"
+                    className={cn(
+                      "transition-colors cursor-pointer disabled:opacity-50",
+                      webSearchEnabled
+                        ? "text-blue-400 hover:text-blue-300"
+                        : "text-gray-400 hover:text-gray-300"
+                    )}
+                    onClick={toggleWebSearch}
+                    title={webSearchEnabled ? "Disable web search" : "Enable web search"}
+                  >
+                    <div className='flex gap-1 items-center'>
+                      <Icons.search className={cn("w-4 h-4", webSearchEnabled && "text-blue-400")} />
+                      <p className={webSearchEnabled ? "text-blue-400" : ""}>Search</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+
+        <div className="space-y-3 pt-10">
+          <div className="text-sm text-gray-400">Try building</div>
+          <div className="flex flex-wrap gap-2 flex-row items-center justify-center">
+            {examplePrompts.map((example, index) => (
+              <button
+                key={index}
+                className="px-3 py-1.5 text-sm bg-[#161618] border border-[#313133] rounded-full hover:bg-[#1e1e20] transition-colors disabled:opacity-50"
+                onClick={() => {
+                  if (status !== "authenticated" || !session) {
+                    const encodedPrompt = encodeURIComponent(example);
+                    router.push(`/login?returnPrompt=${encodedPrompt}`);
+                  } else {
+                    setPrompt(example);
+                  }
+                }}
+              >
+                {example}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Start coding section */}
+        <div className="space-y-6 pt-12">
+          <h2 className="text-sm font-medium text-gray-200">
+            Or start a blank app with your favorite stack
+          </h2>
+
+          <div className="flex items-center space-x-2 overflow-x-auto pb-2 justify-center">
+            <div className="flex items-center gap-3">
+              {STARTER_TEMPLATES.map((template) => (
+                <button
+                  key={template.name}
+                  onClick={() => handleTemplateClick(template)}
+                  className={`flex flex-col items-center gap-2 group hover:bg-gray-900 rounded-lg p-4 transition-colors justify-center`}
+                  aria-label={template.label}
+                >
+                  <div className="w-8 h-8 flex items-center justify-center opacity-70 group-hover:opacity-100 transition-opacity">
+                    {Icons[template.icon]({
+                      className: "w-8 h-8",
+                      style: { maskType: "alpha" },
+                    })}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
       </div>
-    </div>
+
+      <UpgradeDialog
+        open={showUpgradeDialog}
+        onOpenChange={setShowUpgradeDialog}
+      />
+    </div >
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <AuthenticatedLayout>
+      <Chat />
+    </AuthenticatedLayout>
   );
 }

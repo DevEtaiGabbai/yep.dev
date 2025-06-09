@@ -175,7 +175,7 @@ class WebContainerManager {
       try {
         // Increased delay before booting to ensure browser is ready
 
-        await new Promise(r => setTimeout(r, 1500));
+        await new Promise(r => setTimeout(r, 500));
 
         // Add retry logic for WebContainer boot
         let attempts = 0;
@@ -196,7 +196,7 @@ class WebContainerManager {
 
 
             // Wait longer for network to stabilize after boot
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 500));
 
             resolve(container);
             return;

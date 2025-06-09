@@ -14,12 +14,12 @@ export function PreviewPanel() {
 
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [iframeSrc, setIframeSrc] = useState<string | null>(activePreviewUrl);
+  
   useEffect(() => {
     if (activePreviewUrl !== iframeSrc) {
       setIframeSrc(activePreviewUrl);
     }
   }, [activePreviewUrl, iframeSrc]);
-
 
   const handleRefresh = useCallback(() => {
     if (iframeRef.current && iframeSrc) {
@@ -39,12 +39,17 @@ export function PreviewPanel() {
     }
   }, [iframeSrc]);
 
-  const handleActivePreviewChange = (port: number) => {
-    const newPreview = previews.find(p => p.port === port);
-    if (newPreview) {
-      setActivePreview(port, newPreview.baseUrl);
+  // Add effect to check if we need to start a dev server when preview tab is opened
+  useEffect(() => {
+    // If preview panel is mounted but no previews are available, 
+    // dispatch a custom event to potentially start the dev server
+    if (previews.length === 0 && !iframeSrc) {
+      const event = new CustomEvent('requestDevServer', { 
+        detail: { reason: 'preview_tab_opened' } 
+      });
+      window.dispatchEvent(event);
     }
-  };
+  }, [previews.length, iframeSrc]);
 
   return (
     <div className="flex flex-col h-full bg-[#101012]">
@@ -62,11 +67,7 @@ export function PreviewPanel() {
           />
         </div>
         {previews && previews.length > 0 && (
-          <PortDropdown
-          // activePreviewPort={activePreviewPort} // From store
-          // previews={previews} // From store
-          // onSelectPreview={handleActivePreviewChange} // Action to update store
-          />
+          <PortDropdown />
         )}
 
         <Button variant="ghost" size="icon" onClick={handleOpenInNewTab} disabled={!iframeSrc} className="text-[#969798] hover:text-white h-7 w-7">
@@ -87,12 +88,11 @@ export function PreviewPanel() {
           />
         ) : (
           <div className="flex flex-col items-center justify-center h-full text-[#969798] bg-[#101012]">
-            <Icons.github className="h-12 w-12 mb-4 opacity-50" /> {/* Make sure Icons.preview exists */}
+            <Icons.github className="h-12 w-12 mb-4 opacity-50" />
             <p className="text-sm">Preview will appear here once the server starts.</p>
             <p className="text-xs mt-1 opacity-70">Ensure your application&apos;s dev server is running.</p>
           </div>
         )}
-
       </div>
     </div>
   );

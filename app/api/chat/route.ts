@@ -1,4 +1,4 @@
-import { getUserApiKeys } from '@/lib/api-keys';
+import { getApiKeysFromRequest } from '@/lib/api-keys';
 import { MAX_TOKENS_NO_SUMMARY } from '@/lib/constants';
 import { CONTINUE_PROMPT, WORK_DIR } from '@/lib/prompt';
 import { createSummary } from '@/lib/server/create-summary';
@@ -35,13 +35,14 @@ function parseCookies(cookieHeader: string): Record<string, string> {
 export async function POST(request: Request) {
   try {
     const requestData = await request.json();
-    const { messages, files, promptId, contextOptimization, conversationId, selectedModel } = requestData as {
+    const { messages, files, promptId, contextOptimization, conversationId, selectedModel, apiKeys: clientApiKeys } = requestData as {
       messages: Messages;
       files: any;
       promptId?: string;
       contextOptimization: boolean;
       conversationId?: string;
       selectedModel?: string;
+      apiKeys?: Record<string, string>;
     };
 
     if (messages.length === 0) {
@@ -106,7 +107,9 @@ export async function POST(request: Request) {
     }
 
     const cookieHeader = request.headers.get('Cookie');
-    const apiKeys = await getUserApiKeys();
+
+    // Get API keys from client request
+    const apiKeys = getApiKeysFromRequest(clientApiKeys);
 
     const providerSettings: Record<string, IProviderSetting> = JSON.parse(
       parseCookies(cookieHeader || '').providers || '{}',
@@ -144,15 +147,28 @@ export async function POST(request: Request) {
         // Save user message to conversation if conversationId is provided
         if (conversationId && lastUserMessage) {
           try {
-            // Convert content to string for database storage
-            const contentForDB = typeof lastUserMessage.content === 'string'
+            // Check if this exact message already exists in the conversation to prevent duplicates
+            const existingConversation = await getConversation(conversationId);
+            const messageText = typeof lastUserMessage.content === 'string'
               ? lastUserMessage.content
               : JSON.stringify(lastUserMessage.content);
 
-            await addMessage(conversationId, {
-              role: 'user',
-              content: contentForDB
+            const messageAlreadyExists = existingConversation?.messages.some(msg => {
+              if (msg.role !== 'user') return false;
+
+              const existingContent = typeof msg.content === 'string'
+                ? msg.content
+                : JSON.stringify(msg.content);
+
+              return existingContent === messageText;
             });
+
+            if (!messageAlreadyExists) {
+              await addMessage(conversationId, {
+                role: 'user',
+                content: messageText
+              });
+            }
           } catch (error) {
             console.error('Failed to save user message:', error);
             // Continue processing even if user message save fails
@@ -282,18 +298,6 @@ export async function POST(request: Request) {
             }
 
             if (finishReason !== 'length') {
-              // Save assistant message to conversation if conversationId is provided
-              if (conversationId) {
-                try {
-                  // Call addMessage function directly instead of using fetch API
-                  await addMessage(conversationId, {
-                    role: 'assistant',
-                    content
-                  });
-                } catch (error) {
-                  console.error('Failed to save assistant message:', error);
-                }
-              }
 
               dataStream.writeMessageAnnotation({
                 type: 'usage',

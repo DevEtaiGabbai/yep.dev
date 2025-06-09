@@ -6,7 +6,6 @@ import { AlertTriangle, Github, X } from 'lucide-react';
 
 interface ErrorNotificationModalProps {
     error: string | null;
-    isGitHubRateLimited?: boolean;
     rateLimitResetTime?: string | null;
     onClose: () => void;
     isOpen: boolean;
@@ -14,7 +13,6 @@ interface ErrorNotificationModalProps {
 
 export function ErrorNotificationModal({
     error,
-    isGitHubRateLimited = false,
     rateLimitResetTime = null,
     onClose,
     isOpen,
@@ -23,7 +21,6 @@ export function ErrorNotificationModal({
         return null;
     }
 
-    const isRateLimitError = error.includes('rate limit exceeded') || isGitHubRateLimited;
     const isNotFoundError = error.includes('Status: 404') || error.includes('Not Found');
 
     return (
@@ -46,21 +43,6 @@ export function ErrorNotificationModal({
                         <p className="text-sm text-[#c0c0c0] mb-3 whitespace-pre-wrap break-words">{error}</p>
                     </div>
                 </div>
-
-                {isRateLimitError && (
-                    <div className="mt-3 bg-[#2a2a2c]/70 p-3 border-l-2 border-red-500 rounded-r-md">
-                        <div className="flex items-center mb-1">
-                            <Github className="mr-2 text-[#a0a0a0]" size={14} />
-                            <h3 className="text-xs font-medium text-red-400">GitHub API Rate Limit Exceeded</h3>
-                        </div>
-                        {rateLimitResetTime && (
-                            <p className="text-xs text-[#a0a0a0]">Rate limit will reset at: {rateLimitResetTime}</p>
-                        )}
-                        <p className="text-xs text-[#a0a0a0] mt-1">
-                            Consider adding a GitHub personal access token for higher rate limits.
-                        </p>
-                    </div>
-                )}
 
                 {isNotFoundError && (
                     <div className="mt-3 bg-[#2a2a2c]/70 p-3 border-l-2 border-red-500 rounded-r-md">

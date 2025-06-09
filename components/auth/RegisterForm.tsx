@@ -69,7 +69,7 @@ export function RegisterForm() {
       // Redirect to login page after a slight delay
       setTimeout(() => {
         router.push("/login");
-      }, 500);
+      }, 100);
     } catch (error: any) {
       setError(error.message || "Something went wrong. Please try again.");
       console.error("Registration error:", error);
@@ -80,7 +80,7 @@ export function RegisterForm() {
 
   const handleOAuthSignIn = (provider: string) => {
     setIsLoading(true);
-    signIn(provider, { callbackUrl: "/chat" });
+    signIn(provider, { callbackUrl: "/" });
   };
 
   return (

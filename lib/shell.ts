@@ -76,6 +76,7 @@ export class BoltShell {
   private shellInputStream: WritableStreamDefaultWriter<string> | undefined;
   private initialized = false;
   private isInteractive = false;
+  private dataListenerDisposable: { dispose: () => void } | null = null;
 
   constructor() { }
 
@@ -129,7 +130,12 @@ export class BoltShell {
 
       this._commandStreamReader = commandStreamForParsing.getReader();
 
-      this._terminal.onData((data) => {
+      // Dispose of any existing data listener
+      if (this.dataListenerDisposable) {
+        this.dataListenerDisposable.dispose();
+      }
+
+      this.dataListenerDisposable = this._terminal.onData((data) => {
         if (this.isInteractive) {
           inputWriter.write(data).catch(e => console.error("BoltShell input error:", e));
         }
@@ -229,20 +235,14 @@ export class BoltShell {
 
     if (this._process && this.isInteractive) {
       console.log('BoltShell: Reconnecting terminal to existing process');
-
-      // Re-establish terminal connection with the existing process
       try {
-        const [terminalStream, commandStreamForParsing] = this._process.output.tee();
+        // Dispose of any existing data listener
+        if (this.dataListenerDisposable) {
+          this.dataListenerDisposable.dispose();
+        }
 
-        terminalStream.pipeTo(new WritableStream({
-          write: (data) => {
-            this._terminal?.write(data);
-          },
-        })).catch(e => console.error("BoltShell restore UI pipe error:", e));
-
-        this._commandStreamReader = commandStreamForParsing.getReader();
-
-        this._terminal.onData((data) => {
+        // Set up new data listener for the new terminal instance
+        this.dataListenerDisposable = this._terminal.onData((data) => {
           if (this.isInteractive && this.shellInputStream) {
             this.shellInputStream.write(data).catch(e => console.error("BoltShell restore input error:", e));
           }
@@ -260,6 +260,15 @@ export class BoltShell {
 
   cleanup(): void {
     console.log('BoltShell: Cleaning up...');
+
+    try {
+      if (this.dataListenerDisposable) {
+        this.dataListenerDisposable.dispose();
+        this.dataListenerDisposable = null;
+      }
+    } catch (e) {
+      console.warn('BoltShell: Error disposing data listener:', e);
+    }
 
     try {
       if (this._commandStreamReader) {

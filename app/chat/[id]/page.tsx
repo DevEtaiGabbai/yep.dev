@@ -1,5 +1,6 @@
 "use client";
 
+import { UpgradeDialog } from "@/app/components/UpgradeDialog";
 import {
   $workbench,
   addDirectoryToWorkbench,
@@ -20,14 +21,11 @@ import {
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
 import { useAIChat } from "@/hooks/useAIChat";
-import { useBoltActionDetector } from "@/hooks/useBoltActionDetector";
-import { useGitHubFiles } from "@/hooks/useGitHubFiles";
+import { useCloudFrontTemplate } from "@/hooks/useCloudFrontTemplate";
 import { useWebContainer } from "@/hooks/useWebContainer";
 import { DEFAULT_TEMPLATE, STARTER_TEMPLATES } from "@/lib/constants";
-import { WORK_DIR } from "@/lib/prompt";
 import { Message } from "@/lib/services/conversationService";
 import { getTerminalStore } from "@/stores/terminal";
-import he from "he";
 import { useSession } from "next-auth/react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -39,17 +37,23 @@ function Workspace() {
   const { data: session, status } = useSession();
   const router = useRouter();
 
-  // URL Parameters
   const params = useParams();
   const searchParams = useSearchParams();
   const conversationId = typeof params.id === "string" ? params.id : "";
-  const templateNameFromUrl =
-    searchParams.get("template") || DEFAULT_TEMPLATE.name;
-  const initialPrompt = searchParams.get("prompt");
-  const sendFirst = searchParams.get("sendFirst") === "true";
+
+  // Initialize with defaults - will be updated when conversation loads
+  const [templateName, setTemplateName] = useState(DEFAULT_TEMPLATE.name);
+  const [initialPrompt, setInitialPrompt] = useState<string | null>(null);
+  const [sendFirst, setSendFirst] = useState(false);
+
+  // Support legacy URL parameters for backward compatibility
+  const templateNameFromUrl = searchParams.get("template");
+  const initialPromptFromUrl = searchParams.get("prompt");
+  const sendFirstFromUrl = searchParams.get("sendFirst") === "true";
   const modelFromUrl = searchParams.get("model");
+
   const template =
-    STARTER_TEMPLATES.find((t) => t.name === templateNameFromUrl) ||
+    STARTER_TEMPLATES.find((t) => t.name === templateName) ||
     DEFAULT_TEMPLATE;
 
   const [conversationMessages, setConversationMessages] = useState<Message[]>(
@@ -72,6 +76,7 @@ function Workspace() {
   );
   const [projectId, setProjectId] = useState<string | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
 
   const initialPromptSentRef = useRef(false);
   const projectInitializationDoneRef = useRef(false);
@@ -81,7 +86,6 @@ function Workspace() {
   const mainTerminalRef = useRef<TerminalRef | null>(null);
   const workbenchState = $workbench.get();
   const {
-    currentView,
     files: filesFromStore,
     selectedFile: currentSelectedFileInStore,
     isProcessingArtifact,
@@ -89,7 +93,6 @@ function Workspace() {
 
   const {
     webContainerInstance,
-    isInitializingWebContainer,
     isInstallingDeps,
     isStartingDevServer,
     initializationError,
@@ -99,20 +102,10 @@ function Workspace() {
   } = useWebContainer(mainTerminalRef);
 
   const {
-    files: githubFiles,
-    selectedFile: selectedGithubFile,
-    isLoadingGitHubFiles,
-    gitHubError,
-    rateLimit,
-    loadFileContent,
-    refreshRepository,
-  } = useGitHubFiles(webContainerInstance, template.githubRepo);
-
-  // Action detector
-  const { processedActions } = useBoltActionDetector(
-    webContainerInstance,
-    runTerminalCommand
-  );
+    files: templateFiles,
+    selectedFile: selectedTemplateFile,
+    templateError,
+  } = useCloudFrontTemplate(webContainerInstance, template.cloudFrontUrl);
 
   // AI Chat (existing logic)
   const {
@@ -153,13 +146,12 @@ function Workspace() {
     }
   }, [status, router]);
 
-
   // Load conversation
   useEffect(() => {
     async function loadConversation() {
       if (!conversationId || status !== "authenticated" || conversationDataFetchedRef.current) return;
 
-      conversationDataFetchedRef.current = true; // Set ref immediately
+      conversationDataFetchedRef.current = true;
       try {
         const response = await fetch(`/api/conversations/${conversationId}`);
         if (!response.ok) {
@@ -173,13 +165,39 @@ function Workspace() {
         const data = await response.json();
         if (data.conversation && data.conversation.messages) {
           // Store the original messages as-is from the database
-          // The database already contains the correct signed URLs
+          // The database should now contain clean narrative content with "Updated filename" messages
           setConversationMessages(data.conversation.messages);
 
           const assistantMessages = data.conversation.messages.filter(
             (m: Message) => m.role === "assistant"
           );
           if (assistantMessages.length > 0) {
+            console.log(`Loaded ${assistantMessages.length} assistant messages from conversation`);
+          }
+
+          // Extract metadata from conversation
+          const conversation = data.conversation;
+
+          // Use conversation metadata, fallback to URL params for backward compatibility
+          setTemplateName(conversation.templateName || templateNameFromUrl || DEFAULT_TEMPLATE.name);
+          setSendFirst(conversation.sendFirst ?? sendFirstFromUrl);
+
+          // Extract initial prompt from first user message if available
+          if (conversation.messages.length > 0) {
+            const firstMessage = conversation.messages[0];
+            if (firstMessage.role === "user") {
+              const promptText = typeof firstMessage.content === "string"
+                ? firstMessage.content
+                : firstMessage.content.find(c => c.type === "text")?.text;
+              if (promptText) {
+                setInitialPrompt(promptText);
+              }
+            }
+          }
+
+          // Fallback to URL param if no prompt found in messages
+          if (!initialPrompt && initialPromptFromUrl) {
+            setInitialPrompt(initialPromptFromUrl);
           }
         }
         setConversationLoaded(true);
@@ -225,7 +243,7 @@ function Workspace() {
         } else {
           // If fetching conversation fails, we can't proceed reliably.
           console.error("Failed to fetch conversation details, cannot proceed with project creation check.", await response.text());
-          return; // Early exit
+          return;
         }
 
         // Check module-level guard before attempting to create a new project
@@ -256,7 +274,13 @@ function Workspace() {
           projectInitializationDoneRef.current = true;
           // Do NOT remove from projectCreationAttemptedForConversation on success for this session
         } else {
-          console.error("Failed to create project:", await createResponse.text());
+          const errorData = await createResponse.json();
+          if (errorData.requiresUpgrade) {
+            setShowUpgradeDialog(true);
+            projectCreationAttemptedForConversation.delete(conversationId); // Allow retry after upgrade
+            return;
+          }
+          console.error("Failed to create project:", errorData.error || 'Unknown error');
           projectCreationAttemptedForConversation.delete(conversationId); // Allow retry on failure
         }
       } catch (error) {
@@ -277,114 +301,104 @@ function Workspace() {
 
   }, [session?.user?.id, conversationId, projectId, isCreatingProject]);
 
-  // Recreate files from messages
+  // Load project files from database instead of recreating from messages
+  // Track if project files have been loaded to prevent reloading after AI updates
+  const projectFilesLoadedRef = useRef(false);
+  const lastLoadedProjectIdRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (
-      !webContainerInstance ||
-      !conversationLoaded ||
-      conversationMessages.length === 0
-    )
-      return;
-    const recreateFilesFromMessages = async () => {
+    if (!webContainerInstance || !conversationLoaded || !projectId) return;
+
+    // Reset the loaded flag if we're dealing with a different project
+    if (lastLoadedProjectIdRef.current !== projectId) {
+      projectFilesLoadedRef.current = false;
+      lastLoadedProjectIdRef.current = projectId;
+    }
+
+    if (projectFilesLoadedRef.current) return; // Prevent reloading after initial load
+
+    const loadProjectFiles = async () => {
       try {
-        const assistantMessages = conversationMessages.filter(
-          (m) => m.role === "assistant"
-        );
-        if (assistantMessages.length === 0) return;
-        for (const message of assistantMessages) {
-          // Handle both string and array content types safely
-          const messageContent =
-            typeof message.content === "string"
-              ? message.content
-              : message.content
-                .map((part) => (part.type === "text" ? part.text || "" : ""))
-                .join("");
+        const response = await fetch(`/api/projects/${projectId}`);
 
-          if (!messageContent || !messageContent.includes("<boltAction"))
-            continue;
-          const fileActionRegex =
-            /<boltAction\s+type="file"\s+filePath="([^"]+)"[^>]*>([\s\S]*?)<\/boltAction>/g;
-          let match;
-          let fileCount = 0;
-          while ((match = fileActionRegex.exec(messageContent)) !== null) {
-            const [_, filePath, fileContent] = match;
-            if (filePath && fileContent) {
-              try {
-                let cleanPath = filePath.trim();
+        if (!response.ok) {
+          projectFilesLoadedRef.current = true;
+          return;
+        }
 
-                // Normalize the file path to prevent duplication of WORK_DIR
-                // Remove leading slash if present for normalization
-                let pathForNormalization = cleanPath.startsWith("/")
-                  ? cleanPath.substring(1)
-                  : cleanPath;
+        const projectData = await response.json();
+        if (projectData.project?.files && projectData.project.files.length > 0) {
+          let firstFileToSelect = null;
 
-                // Check if the path already contains the work directory structure
-                if (pathForNormalization.startsWith("home/project/")) {
-                  // Path already has full work dir, just add leading slash
-                  cleanPath = "/" + pathForNormalization;
-                } else if (pathForNormalization.startsWith("project/")) {
-                  // Path has partial work dir, prepend /home/
-                  cleanPath = "/home/" + pathForNormalization;
-                } else {
-                  // Path is relative, prepend full WORK_DIR
-                  if (!cleanPath.startsWith("/")) cleanPath = "/" + cleanPath;
-                  cleanPath = WORK_DIR + cleanPath;
+          for (const file of projectData.project.files) {
+            try {
+              const normalizedPath = file.path.startsWith('/') ? file.path : `/${file.path}`;
+              const fullPath = normalizedPath.startsWith('/home/project/')
+                ? normalizedPath
+                : `/home/project/${normalizedPath.replace(/^\//, '')}`;
+
+              if (file.content) {
+                await updateFileInWorkbench(fullPath, file.content, webContainerInstance);
+
+                // Prefer app files for selection
+                if (
+                  fullPath.includes('index.tsx') ||
+                  fullPath.includes('main.tsx') ||
+                  fullPath.includes('App.tsx')
+                ) {
+                  firstFileToSelect = fullPath;
                 }
-
-                const decodedContent = he.decode(fileContent.trim());
-                await updateFileInWorkbench(
-                  cleanPath,
-                  decodedContent,
-                  webContainerInstance
-                );
-                fileCount++;
-                if (fileCount === 1) {
-                  setSelectedWorkbenchFile(cleanPath);
-                  setWorkbenchView("Editor");
-                }
-              } catch (error) {
-                console.error(`Error recreating file ${filePath}:`, error);
               }
+            } catch (error) {
+              console.error(`❌ Error loading file ${file.path}:`, error);
             }
           }
+
+          if (firstFileToSelect) {
+            setSelectedWorkbenchFile(firstFileToSelect);
+            setWorkbenchView("Editor");
+          }
+
+          console.log(`✅ Loaded ${projectData.project.files.length} files from database for project ${projectId}`);
+        } else {
+          console.log("No project files found, will use template files");
         }
+
+        projectFilesLoadedRef.current = true; // Mark as loaded
       } catch (error) {
-        console.error("Error recreating files from conversation:", error);
+        console.error("Error loading project files:", error);
+        projectFilesLoadedRef.current = true; // Mark as loaded even on error to prevent retries
       }
     };
-    recreateFilesFromMessages();
-  }, [webContainerInstance, conversationLoaded, conversationMessages]);
 
-  // Handle GitHub Errors and Template Fallback
+    // Add a small delay to ensure WebContainer is fully ready
+    const timeoutId = setTimeout(loadProjectFiles, 500);
+    return () => clearTimeout(timeoutId);
+  }, [webContainerInstance, conversationLoaded, projectId]);
+
+  // Handle Template Errors and Template Fallback
   useEffect(() => {
-    if (gitHubError) {
+    if (templateError) {
       if (template.name !== DEFAULT_TEMPLATE.name && !templateFallbackUsed) {
         console.warn(
-          `GitHub error with template ${template.name}, falling back to default: ${gitHubError}`
+          `Template error with template ${template.name}, falling back to default: ${templateError}`
         );
         setTemplateFallbackUsed(true);
-        const fallbackQueryString = `template=${DEFAULT_TEMPLATE.name}${initialPrompt ? `&prompt=${encodeURIComponent(initialPrompt)}` : ""
-          }&sendFirst=${sendFirst}${modelFromUrl ? `&model=${encodeURIComponent(modelFromUrl)}` : ""
-          }`;
-        router.replace(`/app/${conversationId}?${fallbackQueryString}`);
+        setTemplateName(DEFAULT_TEMPLATE.name); // Update template state instead of URL
       } else if (!templateFallbackUsed) {
         // Error occurred on default template or after fallback
         console.error(
-          `GitHub error (not falling back or already on default): ${gitHubError}`
+          `Template error (not falling back or already on default): ${templateError}`
         );
-        setErrorNotificationDetails(gitHubError);
+        setErrorNotificationDetails(templateError);
         setShowErrorNotification(true);
       }
     }
   }, [
-    gitHubError,
+    templateError,
     template.name,
     templateFallbackUsed,
-    router,
     conversationId,
-    initialPrompt,
-    sendFirst,
-    modelFromUrl,
   ]);
 
   // Handle WebContainer Initialization Errors (e.g., dev server failed)
@@ -400,23 +414,18 @@ function Workspace() {
 
   // --- Other existing useEffects and Callbacks (no changes needed for them, ensure they are present) ---
   useEffect(() => {
-    if (processedActions.length > 0) {
-    }
-  }, [processedActions]);
-
-  useEffect(() => {
     if (
-      Object.keys(githubFiles).length > 0 &&
+      Object.keys(templateFiles).length > 0 &&
       Object.keys(filesFromStore).length === 0
     ) {
-      $workbench.setKey("files", githubFiles);
-      if (selectedGithubFile && !currentSelectedFileInStore) {
-        setSelectedWorkbenchFile(selectedGithubFile);
+      $workbench.setKey("files", templateFiles);
+      if (selectedTemplateFile && !currentSelectedFileInStore) {
+        setSelectedWorkbenchFile(selectedTemplateFile);
       }
     }
   }, [
-    githubFiles,
-    selectedGithubFile,
+    templateFiles,
+    selectedTemplateFile,
     filesFromStore,
     currentSelectedFileInStore,
   ]);
@@ -577,12 +586,11 @@ function Workspace() {
   useEffect(() => {
     if (
       webContainerInstance &&
-      !isLoadingGitHubFiles &&
       Object.keys(filesFromStore).length > 0 &&
       !installSequenceTriggered &&
       !isInstallingDeps &&
-      !initializationError && // Check if no WC init error
-      !gitHubError // Check if no GitHub error (or if it was handled by fallback)
+      !initializationError &&
+      !templateError
     ) {
       setInstallSequenceTriggered(true);
       const runInstallAndStart = async () => {
@@ -592,7 +600,6 @@ function Workspace() {
           await startDevServer();
 
           // Force refresh preview after starting dev server
-          //consider
           setTimeout(() => {
             const previews = $workbench.get().previews;
             if (previews.length > 0) {
@@ -603,26 +610,25 @@ function Workspace() {
                 setActivePreview(mainPreview.port, mainPreview.baseUrl);
               }
             }
-          }, 3000); // Wait a bit for the server to fully start
+          }, 1000); // Wait a bit for the server to fully start
         } else {
           console.error(
             "Failed to install dependencies after multiple attempts"
           );
-          // Error already shown in terminal/modal
         }
       };
       runInstallAndStart();
     }
   }, [
     webContainerInstance,
-    isLoadingGitHubFiles,
+    // isLoadingTemplate,
     filesFromStore,
     installSequenceTriggered,
     runNpmInstall,
     startDevServer,
     isInstallingDeps,
     initializationError,
-    gitHubError,
+    templateError,
   ]);
 
   useEffect(() => {
@@ -631,7 +637,7 @@ function Workspace() {
       sendFirst &&
       !initialPromptSentRef.current &&
       !isSubmittingInitialPrompt &&
-      Object.keys(githubFiles).length > 0 &&
+      Object.keys(templateFiles).length > 0 &&
       conversationLoaded &&
       sendCurrentMessagesToLLM
     ) {
@@ -661,7 +667,6 @@ function Workspace() {
         setIsSubmittingInitialPrompt(false);
         return;
       } else if (hasUserMessage && !hasAssistantResponse) {
-        // Don't call sendMessageToAI here, use sendCurrentMessagesToLLM instead to avoid duplicate
         setPromptSubmitted(true);
         setIsSubmittingInitialPrompt(true);
 
@@ -682,9 +687,7 @@ function Workspace() {
             });
         }, 100);
         return;
-      } else {
       }
-
       setPromptSubmitted(true);
       setIsSubmittingInitialPrompt(true);
 
@@ -766,7 +769,7 @@ function Workspace() {
     initialPrompt,
     sendFirst,
     isSubmittingInitialPrompt,
-    githubFiles ? Object.keys(githubFiles).length > 0 : false,
+    templateFiles ? Object.keys(templateFiles).length > 0 : false,
     conversationLoaded,
     sendMessageToAI,
     sendCurrentMessagesToLLM,
@@ -780,13 +783,6 @@ function Workspace() {
       setPromptSubmitted(true);
     }
   }, [openRouterError, initialPrompt, promptSubmitted]);
-
-
-
-
-
-
-
 
   // Add a more comprehensive error handling effect
   useEffect(() => {
@@ -817,30 +813,6 @@ function Workspace() {
       }
     };
   }, [isSubmittingInitialPrompt]);
-
-
-
-
-  const handleRefreshRepository = useCallback(async () => {
-    if (refreshRepository) {
-      try {
-        await refreshRepository();
-        if (initialPrompt && !promptSubmitted) {
-          setInput(initialPrompt);
-          sendMessageToAI(initialPrompt.trim());
-          setPromptSubmitted(true);
-        }
-      } catch (error) {
-        console.error("Error refreshing repository:", error);
-      }
-    }
-  }, [
-    refreshRepository,
-    initialPrompt,
-    promptSubmitted,
-    setInput,
-    sendMessageToAI,
-  ]);
 
   useEffect(() => {
     if (streamingComplete && aiCompletedFiles && aiCompletedFiles.size > 0) {
@@ -892,15 +864,50 @@ function Workspace() {
       }, 1000);
     };
 
+    const handleRequestDevServer = async (event: CustomEvent) => {
+      const reason = event.detail?.reason || 'manual_request';
+      console.log(`[RequestDevServer] Request received: ${reason}`);
+
+      // Check if we have files but no preview server
+      const currentPreviews = $workbench.get().previews;
+      const hasNoActiveServer = !currentPreviews.some(p => p.ready);
+
+      if (hasNoActiveServer && webContainerInstance && Object.keys(filesFromStore).length > 0) {
+        console.log('[RequestDevServer] No active server found, attempting to start dev server');
+
+        // Try to start the dev server manually
+        if (runTerminalCommand && terminalStoreManager?.actions) {
+          try {
+            terminalStoreManager.actions.setTerminalRunning("bolt", true, "npm run dev");
+            await runTerminalCommand("npm run dev", "bolt");
+          } catch (error) {
+            console.error('[RequestDevServer] Failed to start dev server:', error);
+            if (mainTerminalRef.current) {
+              mainTerminalRef.current.writeToTerminal(`
+[31mError starting dev server: ${error instanceof Error ? error.message : String(error)}[0m
+❯ `);
+            }
+          } finally {
+            terminalStoreManager.actions.setTerminalRunning("bolt", false);
+          }
+        }
+      } else {
+        console.log('[RequestDevServer] Server already running or conditions not met', {
+          hasActiveServer: !hasNoActiveServer,
+          hasWebContainer: !!webContainerInstance,
+          hasFiles: Object.keys(filesFromStore).length > 0
+        });
+      }
+    };
+
     window.addEventListener("forcePreviewRefresh", handleForcePreviewRefresh);
+    window.addEventListener("requestDevServer", handleRequestDevServer);
 
     return () => {
-      window.removeEventListener(
-        "forcePreviewRefresh",
-        handleForcePreviewRefresh
-      );
+      window.removeEventListener("forcePreviewRefresh", handleForcePreviewRefresh);
+      window.removeEventListener("requestDevServer", handleRequestDevServer);
     };
-  }, []);
+  }, [webContainerInstance, filesFromStore, runTerminalCommand, terminalStoreManager, mainTerminalRef]);
 
   useEffect(() => {
     if (
@@ -910,9 +917,13 @@ function Workspace() {
       !initialStreamCompleted &&
       messages.length > 1
     ) {
+      // Clean up URL by removing all query parameters for cleaner URLs
       const url = new URL(window.location.href);
-      url.searchParams.set("sendFirst", "false");
-      window.history.replaceState({}, "", url.toString());
+      // const hasParams = url.search.length > 0;
+      // if (hasParams) {
+      //   url.search = ''; // Remove all query parameters
+      //   window.history.replaceState({}, "", url.toString());
+      // }
       setInitialStreamCompleted(true);
     }
   }, [
@@ -932,7 +943,7 @@ function Workspace() {
   }
 
   if (
-    isLoadingGitHubFiles &&
+    // isLoadingTemplate &&
     Object.keys(filesFromStore).length === 0 &&
     !showErrorNotification
   ) {
@@ -980,11 +991,9 @@ function Workspace() {
             completedFiles={aiCompletedFiles}
             activeCommand={aiActiveCommand}
             completedCommands={aiCompletedCommands}
-            isLoadingGitHubFiles={isLoadingGitHubFiles}
             isInstallingDeps={isInstallingDeps}
             isStartingDevServer={isStartingDevServer}
             progress={streamingData?.progressUpdates}
-            onRefreshRepository={handleRefreshRepository}
             onModelChange={handleModelChange}
           />
         </ResizablePanel>
@@ -1003,16 +1012,15 @@ function Workspace() {
       <ErrorNotificationModal
         isOpen={showErrorNotification}
         error={errorNotificationDetails}
-        isGitHubRateLimited={gitHubError?.toLowerCase().includes("rate limit")}
-        rateLimitResetTime={
-          rateLimit?.resetTime
-            ? new Date(+rateLimit.resetTime * 1000).toLocaleTimeString()
-            : undefined
-        }
         onClose={() => {
           setShowErrorNotification(false);
           setErrorNotificationDetails(null);
         }}
+      />
+
+      <UpgradeDialog
+        open={showUpgradeDialog}
+        onOpenChange={setShowUpgradeDialog}
       />
     </div>
   );

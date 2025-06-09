@@ -1,6 +1,7 @@
 // app/api/conversations/route.ts
 import { authOptions } from '@/lib/auth';
-import { addMessage, createConversation, getUserConversations } from '@/lib/services/conversationService';
+import { MAX_FREE_PROJECT } from '@/lib/constants';
+import { createConversation, getUserConversations } from '@/lib/services/conversationService';
 import { getServerSession } from 'next-auth';
 import { NextResponse } from 'next/server';
 
@@ -35,22 +36,40 @@ export async function POST(request: Request) {
 
     const userId = session.user.id || session.user.email;
     const requestData = await request.json();
-    const { title, initialMessage, templateName, projectId } = requestData;
+    const { title, initialMessage, templateName, projectId, sendFirst = true } = requestData;
 
-    const conversation = await createConversation(userId, title, projectId);
-
-    // If there's an initial message, add it to the conversation
-    if (initialMessage) {
-      try {
-        await addMessage(conversation.id, {
-          role: 'user',
-          content: initialMessage,
-        });
-      } catch (messageError) {
-        console.error("POST /api/conversations: Error adding initial message:", messageError);
-        // Continue even if message add fails - the conversation was created
+    // Check subscription status and project limit for free users
+    const { db } = await import('@/lib/db');
+    const user = await db.user.findUnique({
+      where: { id: userId },
+      include: {
+        projects: true
       }
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
+
+    if (!user.isSubscribed && user.projects.length >= MAX_FREE_PROJECT) {
+      return NextResponse.json(
+        {
+          error: 'Project limit reached',
+          message: 'Free users can create up to 5 projects. Upgrade to Pro for unlimited projects.',
+          requiresUpgrade: true
+        },
+        { status: 403 }
+      );
+    }
+
+    const conversation = await createConversation(
+      userId,
+      title,
+      projectId,
+      templateName,
+      sendFirst,
+      initialMessage // Pass the initial message to be stored
+    );
 
     return NextResponse.json({
       success: true,

@@ -15,10 +15,8 @@ import {
     SidebarTrigger,
     useSidebar
 } from "@/components/ui/sidebar";
-import { DEFAULT_TEMPLATE } from "@/lib/constants";
 import { Conversation } from "@/lib/services/conversationService";
 import { cn } from "@/lib/utils";
-import { formatDistanceToNow } from "date-fns";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import * as React from "react";
@@ -41,6 +39,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     const router = useRouter();
     const [conversations, setConversations] = useState<Conversation[]>([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
     const pathname = usePathname()
     const activeId = pathname.split('/').pop()
 
@@ -66,41 +65,10 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
     }, []);
 
     const handleConversationClick = (conversationId: string) => {
-        router.push(`/app/${conversationId}?template=${encodeURIComponent(DEFAULT_TEMPLATE.name)}&sendFirst=false`);
+        router.push(`/chat/${conversationId}`);
+
     };
 
-    const handleNewConversation = async () => {
-        try {
-            setIsLoading(true);
-            const response = await fetch('/api/conversations', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    title: 'New Chat'
-                }),
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to create new conversation');
-            }
-
-            const data = await response.json();
-            if (data.conversation && data.conversation.id) {
-                router.push(`/app/${data.conversation.id}?template=${encodeURIComponent(DEFAULT_TEMPLATE.name)}&sendFirst=false`);
-            }
-        } catch (error) {
-            console.error('Error creating new conversation:', error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    // Helper function to format date
-    const formatDate = (date: Date) => {
-        return formatDistanceToNow(new Date(date), { addSuffix: true });
-    };
 
     const handleHomepageClick = () => {
         router.push('/');
@@ -112,9 +80,6 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             className="overflow-hidden [&>[data-sidebar=sidebar]]:flex-row"
             {...props}
         >
-            {/* This is the first sidebar */}
-            {/* We disable collapsible and adjust width to icon. */}
-            {/* This will make the sidebar appear as icons. */}
             <Sidebar
                 collapsible="none"
                 className="!w-[calc(var(--sidebar-width-icon)_+_1px)] border-r border-[#313133] flex flex-col"
@@ -174,12 +139,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                                 ) : (
                                     <SidebarMenu>
                                         {conversations.map((conversation) => (
-                                            <SidebarMenuItem key={conversation.id} className="pt-1 pb-1 pl-3 pr-3">
+                                            <SidebarMenuItem key={conversation.id} className="pt-0 pb-1 pl-1 pr-1">
                                                 <SidebarMenuButton
                                                     onClick={() => handleConversationClick(conversation.id)}
                                                     className={
-                                                        cn('justify-start flex flex-col items-start hover:bg-[#1a1a1c] active:bg-[#1a1a1c] active:text-white hover:text-white rounded-md p-1', {
-                                                            'bg-[#1a1a1c] rounded-md shadow-sm': activeId === conversation.id
+                                                        cn('justify-start flex flex-col items-start hover:bg-[#28282a] active:bg-[#28282a] active:text-white hover:text-white rounded-md p-0', {
+                                                            'bg-[#28282a] rounded-md shadow-sm': activeId === conversation.id
                                                         })
                                                     }
                                                 >
@@ -188,6 +153,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                                                             overflow: 'hidden',
                                                             textOverflow: 'ellipsis',
                                                         }}
+                                                        className="pl-3 pt-1.5"
                                                     >
                                                         {conversation.title || 'Untitled Chat'}
                                                     </div>

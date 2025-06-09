@@ -44,7 +44,7 @@ export default function FileExplorer({
         }
     }, [selectedFile]);
 
-    // Build a more robust tree structure
+    // Build a more robust tree structure - start from project folder
     const fileTreeRoot = useMemo(() => {
         const root: TreeNode = {
             name: "",
@@ -53,15 +53,50 @@ export default function FileExplorer({
             children: {},
         };
 
+        // Filter out excluded paths - matching lib/fileSync.ts
+        const EXCLUDED_FOLDERS = [
+          '.bolt',
+          'node_modules',
+          '.git',
+          '.next',
+          'dist',
+          'build',
+          '.cache',
+          '.vite',
+          'coverage',
+          '.nyc_output',
+          '.DS_Store',
+          'Thumbs.db'
+        ];
+        
         files.forEach((filePath) => {
             // Ensure paths start with a slash for consistent splitting
             const correctedFilePath = filePath.startsWith("/")
                 ? filePath
                 : `/${filePath}`;
-            const parts = correctedFilePath.substring(1).split("/"); // Remove leading '/' then split
+            
+            // Skip files that don't start with /home/project (should not happen with our file sync)
+            if (!correctedFilePath.startsWith('/home/project/')) {
+                return;
+            }
+            
+            // Remove /home/project prefix for display - show relative to project root
+            const relativePath = correctedFilePath.substring('/home/project'.length);
+            const parts = relativePath ? relativePath.substring(1).split("/") : []; // Remove leading '/' then split
+            
+            // If no parts, this is the project root itself
+            if (parts.length === 0) {
+                return;
+            }
+
+            // Check if any part of the path contains excluded folders
+            const shouldExclude = parts.some(part => EXCLUDED_FOLDERS.includes(part));
+            if (shouldExclude) {
+                return;
+            }
 
             let currentLevel = root.children;
-            let currentPath = "";
+            let currentPath = "/home/project";
 
             parts.forEach((part, index) => {
                 currentPath += `/${part}`;

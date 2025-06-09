@@ -127,11 +127,10 @@ export default class OpenRouterProvider extends BaseProvider {
   }): LanguageModelV1 {
     const { model, apiKeys } = options;
 
-    let apiKey = apiKeys?.["OpenRouter"] || process.env[this.config.apiTokenKey];
-
+    let apiKey = apiKeys?.["OpenRouter"];
 
     if (!apiKey) {
-      throw new Error(`Missing API key for ${this.name} provider. Please set ${this.config.apiTokenKey} in your .env.local file or ensure it's configured for your account.`);
+      throw new Error(`Missing API key for ${this.name} provider. Please configure your API key in the application settings.`);
     }
 
     const openRouter = createOpenRouter({

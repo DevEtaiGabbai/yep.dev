@@ -13,18 +13,38 @@ export interface Conversation {
   messages: Message[];
   projectId?: string;
   userId: string;
+  templateName?: string;
+  sendFirst: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
 
-export async function createConversation(userId: string, title?: string, projectId?: string): Promise<Conversation> {
+export async function createConversation(
+  userId: string, 
+  title?: string, 
+  projectId?: string,
+  templateName?: string,
+  sendFirst: boolean = false,
+  initialMessage?: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>
+): Promise<Conversation> {
   const conversation = await prisma.conversation.create({
     data: {
       id: uuidv4(),
       title: title || 'New Chat',
       userId,
-      projectId
-    },
+      projectId,
+      templateName,
+      sendFirst,
+      messages: initialMessage ? {
+        create: {
+          id: uuidv4(),
+          role: 'user',
+          content: typeof initialMessage === 'string' 
+            ? initialMessage 
+            : JSON.stringify(initialMessage)
+        }
+      } : undefined
+    } as any, // Type assertion while IDE catches up with new Prisma types
     include: {
       messages: true,
     },
@@ -40,6 +60,8 @@ export async function createConversation(userId: string, title?: string, project
     })),
     projectId: conversation.projectId || undefined,
     userId: conversation.userId,
+    templateName: (conversation as any).templateName || undefined,
+    sendFirst: (conversation as any).sendFirst || false,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt
   };
@@ -85,6 +107,8 @@ export async function getConversation(conversationId: string): Promise<Conversat
     }),
     projectId: conversation.projectId || undefined,
     userId: conversation.userId,
+    templateName: (conversation as any).templateName || undefined,
+    sendFirst: (conversation as any).sendFirst || false,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt
   };
@@ -117,6 +141,8 @@ export async function getUserConversations(userId: string): Promise<Conversation
     })),
     projectId: conversation.projectId || undefined,
     userId: conversation.userId,
+    templateName: (conversation as any).templateName || undefined,
+    sendFirst: (conversation as any).sendFirst || false,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt
   }));

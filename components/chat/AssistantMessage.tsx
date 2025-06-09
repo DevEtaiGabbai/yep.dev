@@ -1,9 +1,10 @@
 'use client';
 
+import { setSelectedFile as setSelectedWorkbenchFile, setWorkbenchView } from '@/app/lib/stores/workbenchStore';
 import { Markdown } from '@/components/Markdown';
 import { ProgressIndicator } from '@/lib/types/index';
 import { motion } from 'framer-motion';
-import { BookDashed, Brain, MessageSquare, WrapText } from 'lucide-react';
+import { BookDashed, Brain, FileText, Loader2, MessageSquare, WrapText } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 const getTextContent = (content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>): string => {
@@ -42,6 +43,71 @@ const processContent = (content: string): { beforeBolt: string; afterBolt: strin
   result.afterBolt = '';
 
   return result;
+};
+
+// Component to show file streaming/editing status
+const FileStreamingStatus = ({
+  activeFile,
+  completedFiles,
+  isStreaming
+}: {
+  activeFile?: string | null;
+  completedFiles?: Set<string>;
+  isStreaming?: boolean;
+}) => {
+  const handleFileClick = (filePath: string) => {
+    setSelectedWorkbenchFile(filePath);
+    setWorkbenchView('Editor');
+  };
+
+  const getDisplayPath = (filePath: string) => {
+    // Remove the work directory prefix for cleaner display
+    return filePath.replace('/home/project/', '').replace(/^\//, '');
+  };
+
+  if (activeFile && isStreaming) {
+    return (
+      <motion.div
+        className="flex items-center gap-2 mb-3 p-2 bg-blue-600/10 border border-blue-500/20 rounded-lg"
+        initial={{ opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        <Loader2 className="w-4 h-4 text-blue-400 animate-spin" />
+        <span className="text-sm text-blue-400">Editing</span>
+        <button
+          onClick={() => handleFileClick(activeFile)}
+          className="text-sm text-blue-300 hover:text-blue-200 underline hover:no-underline transition-all"
+        >
+          {getDisplayPath(activeFile)}
+        </button>
+      </motion.div>
+    );
+  }
+
+  if (completedFiles && completedFiles.size > 0) {
+    return (
+      <motion.div
+        className="flex flex-col gap-1 mb-3"
+        initial={{ opacity: 0, y: 5 }}
+        animate={{ opacity: 1, y: 0 }}
+      >
+        {Array.from(completedFiles).map((filePath) => (
+          <div key={filePath} className="flex items-center gap-2 p-2 bg-green-600/10 border border-green-500/20 rounded-lg">
+            <FileText className="w-4 h-4 text-green-400" />
+            <span className="text-sm text-green-400">Updated</span>
+            <button
+              onClick={() => handleFileClick(filePath)}
+              className="text-sm text-green-300 hover:text-green-200 underline hover:no-underline transition-all"
+            >
+              {getDisplayPath(filePath)}
+            </button>
+          </div>
+        ))}
+      </motion.div>
+    );
+  }
+
+  return null;
 };
 
 const AiStreamState = ({ isStreaming, progress }: { isStreaming: boolean; progress?: ProgressIndicator[] }) => {
@@ -152,50 +218,39 @@ export const AssistantMessage = ({
 
     const textContent = getTextContent(content);
 
-    // Store original clean content for reference during streaming
-    const rawContent = textContent
-      // First remove SSE specifics that might appear in the completed message
-      .replace(/^\d+:\[[^\]]+\]$/gm, '')
-      .replace(/^f:{[^}]+}$/gm, '')
-      .replace(/^e:{[^}]+}$/gm, '')
-      .replace(/^d:{[^}]+}$/gm, '')
-      .replace(/^8:\[[^\]]+\]$/gm, '')
-      .trim();
+    let parsedCompletedFiles = completedFiles;
+    let cleanedContent = textContent;
 
-    // Extract content before and after bolt artifacts
-    const { beforeBolt, afterBolt } = processContent(rawContent);
-    return (
-      <div className="flex flex-col w-full gap-2">
-        {/* Text before the bolt artifact */}
-        {beforeBolt && (
-          <Markdown
-            content={beforeBolt}
-            isStreaming={isStreaming}
-          />
-        )}
+    if (!completedFiles && !isStreaming && textContent.includes('file://') || textContent.includes('file://')) {
+      const fileLinks = textContent.match(/\[Updated ([^\]]+)\]\(file:\/\/([^)]+)\)/g);
+      if (fileLinks) {
+        const extractedFiles = fileLinks.map(link => {
+          const match = link.match(/\[Updated [^\]]+\]\(file:\/\/([^)]+)\)/);
+          return match ? match[1] : null;
+        }).filter(Boolean) as string[];
 
-        {(activeFile || (completedFiles && completedFiles.size > 0) ||
-          activeCommand || (completedCommands && completedCommands.size > 0)) && (
-            <Markdown
-              content=""
-              activeFile={activeFile}
-              completedFiles={completedFiles}
-              activeCommand={activeCommand}
-              completedCommands={completedCommands}
-              isStreaming={isStreaming}
-            />
-          )}
+        if (extractedFiles.length > 0) {
+          parsedCompletedFiles = new Set(extractedFiles);
+        }
+      }
+    }
 
-        {/* Text after the bolt artifact */}
-        {afterBolt && (
-          <Markdown
-            content={afterBolt}
-            isStreaming={isStreaming}
-          />
-        )}
-      </div>
-    );
-  }, [content, activeFile, completedFiles, activeCommand, completedCommands, isStreaming]);
+    // For streaming content, just display the text directly since it's already been cleaned of boltAction tags
+    if (cleanedContent.trim()) {
+      return (
+        <Markdown
+          content={cleanedContent}
+          isStreaming={isStreaming}
+          activeFile={activeFile}
+          completedFiles={parsedCompletedFiles}
+          activeCommand={activeCommand}
+          completedCommands={completedCommands}
+        />
+      );
+    }
+
+    return null;
+  }, [content, isStreaming, activeFile, completedFiles, activeCommand, completedCommands]);
 
   return (
     <motion.div
@@ -214,6 +269,7 @@ export const AssistantMessage = ({
           )}
 
           {displayContent}
+
         </div>
       </div>
     </motion.div>

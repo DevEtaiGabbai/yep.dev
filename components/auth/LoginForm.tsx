@@ -6,15 +6,18 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signIn } from "next-auth/react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 interface LoginFormProps {
   callbackUrl?: string;
 }
 
-export function LoginForm({ callbackUrl = "/chat" }: LoginFormProps) {
+export function LoginForm({ callbackUrl = "/" }: LoginFormProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const returnPrompt = searchParams.get('returnPrompt');
+
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
@@ -23,6 +26,13 @@ export function LoginForm({ callbackUrl = "/chat" }: LoginFormProps) {
     type: '',
     isLoading: false,
   });
+
+  const getCallbackUrl = () => {
+    if (returnPrompt) {
+      return `/?returnPrompt=${encodeURIComponent(returnPrompt)}`;
+    }
+    return callbackUrl;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -41,7 +51,7 @@ export function LoginForm({ callbackUrl = "/chat" }: LoginFormProps) {
         return;
       }
 
-      router.push(callbackUrl);
+      router.push(getCallbackUrl());
       router.refresh();
     } catch (error) {
       setError("Something went wrong. Please try again.");
@@ -58,7 +68,7 @@ export function LoginForm({ callbackUrl = "/chat" }: LoginFormProps) {
     })
     try {
       await signIn(provider, {
-        callbackUrl: '/chat'
+        callbackUrl: getCallbackUrl()
       });
     } catch (error) {
       setError("Something went wrong. Please try again.");

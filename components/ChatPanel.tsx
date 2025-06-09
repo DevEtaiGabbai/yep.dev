@@ -21,22 +21,12 @@ import {
   ChevronDown,
   Image as ImageIcon,
   Loader2,
-  RefreshCw,
   X
 } from 'lucide-react';
 import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import { Icons } from './ui/icons';
 
-const getTextContent = (content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>): string => {
-  if (typeof content === 'string') {
-    return content;
-  }
-  return content
-    .filter(item => item.type === 'text' && item.text)
-    .map(item => item.text)
-    .join(' ');
-};
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -50,17 +40,13 @@ interface ChatPanelProps {
   completedFiles?: Set<string>;
   activeCommand?: string | null;
   completedCommands?: Set<string>;
-  isLoadingGitHubFiles?: boolean;
   isInstallingDeps?: boolean;
   isStartingDevServer?: boolean;
   progress?: ProgressIndicator[];
-  onRefreshRepository?: () => void;
   onModelChange?: (model: string) => void;
 }
 
 const formatErrorForDisplay = (errorMessage: string) => {
-
-
   // For payment/credit errors, provide a clearer message with link
   if (errorMessage.includes('Insufficient credits') || errorMessage.includes('Payment Required')) {
     return (
@@ -120,11 +106,9 @@ export const ChatPanel = ({
   completedFiles,
   activeCommand,
   completedCommands,
-  isLoadingGitHubFiles = false,
   isInstallingDeps = false,
   isStartingDevServer = false,
   progress = [],
-  onRefreshRepository,
   onModelChange
 }: ChatPanelProps) => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -136,17 +120,19 @@ export const ChatPanel = ({
   const [projectHasBeenLoaded, setProjectHasBeenLoaded] = useState(false);
   const [showingError, setShowingError] = useState(false);
   const [uploadedImages, setUploadedImages] = useState<UploadedImage[]>([]);
-
-
+  const [webSearchEnabled, setWebSearchEnabled] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const savedWebSearch = Cookies.get("webSearchEnabled");
+      return savedWebSearch === "true";
+    }
+    return false;
+  });
 
   const [apiKeys, setApiKeys] = useState<Record<string, string>>();
   const [modelList, setModelList] = useState<ModelInfo[]>(
     DEFAULT_PROVIDER.staticModels
   );
-
-  const [isModelLoading, setIsModelLoading] = useState<string | undefined>(
-    "all"
-  );
+  const [isModelLoading, setIsModelLoading] = useState<string | undefined>("all");
 
   const [model, setModel] = useState(() => {
     const savedModel = Cookies.get("selectedModel");
@@ -180,13 +166,21 @@ export const ChatPanel = ({
     }
   }, [openRouterError]);
 
-  const hasLoadingStarted = isLoadingGitHubFiles || isInstallingDeps || isStartingDevServer || projectHasBeenLoaded;
+  // Notify parent about initial web search state on mount
+  useEffect(() => {
+    if (onModelChange && model) {
+      const effectiveModel = webSearchEnabled ? `${model}:online` : model;
+      onModelChange(effectiveModel);
+    }
+  }, [model, webSearchEnabled, onModelChange]);
+
+  const hasLoadingStarted = isInstallingDeps || isStartingDevServer || projectHasBeenLoaded;
 
   useEffect(() => {
-    if (isLoadingGitHubFiles || isInstallingDeps || isStartingDevServer) {
+    if (isInstallingDeps || isStartingDevServer) {
       setProjectHasBeenLoaded(true);
     }
-  }, [isLoadingGitHubFiles, isInstallingDeps, isStartingDevServer]);
+  }, [isInstallingDeps, isStartingDevServer]);
 
   const scrollToBottom = () => {
     if (chatContainerRef.current) {
@@ -248,9 +242,9 @@ export const ChatPanel = ({
     setUploadedImages([]); // Clear uploaded images after sending
   };
 
-  // GitHub rate limit error helper
+  // Template rate limit error helper (CloudFront shouldn't have rate limits, but keeping for compatibility)
   const isGitHubRateLimitError = openRouterError &&
-    openRouterError.includes('GitHub API rate limit exceeded');
+    openRouterError.includes('rate limit exceeded');
 
   const isPaymentRequiredError = openRouterError &&
     (openRouterError.includes('Payment required') ||
@@ -304,23 +298,40 @@ export const ChatPanel = ({
   };
 
   const handleModelChange = (newModel: string) => {
-    setModel(newModel);
-    Cookies.set("selectedModel", newModel, { expires: 365 });
+    // Remove :online suffix if present when storing the base model
+    const baseModel = newModel.replace(':online', '');
+    setModel(baseModel);
+    Cookies.set("selectedModel", baseModel, { expires: 365 });
+
+    // Send the actual model (with :online if web search is enabled) to parent
+    const effectiveModel = webSearchEnabled ? `${baseModel}:online` : baseModel;
     if (onModelChange) {
-      onModelChange(newModel);
+      onModelChange(effectiveModel);
+    }
+  };
+
+  const toggleWebSearch = () => {
+    const newWebSearchEnabled = !webSearchEnabled;
+    setWebSearchEnabled(newWebSearchEnabled);
+    Cookies.set("webSearchEnabled", String(newWebSearchEnabled), { expires: 365 });
+
+    // Update the effective model sent to parent
+    const effectiveModel = newWebSearchEnabled ? `${model}:online` : model;
+    if (onModelChange) {
+      onModelChange(effectiveModel);
     }
   };
 
   return (
     <div className="w-full flex flex-col h-full bg-[#101012] border-[#313133] shadow-lg overflow-hidden">
       <div className="relative flex-1 overflow-hidden">
+        {!hasLoadingStarted && <div className="flex justify-center"><Loader2 className="w-4 h-4 animate-spin" /></div>}
         <ScrollArea className="h-full bg-[#101012]" ref={chatContainerRef}>
           <div className="py-8 px-4">
             <AnimatePresence>
               <div className="flex flex-col break-words word-wrap">
                 {hasLoadingStarted && (
                   <LoadingProgressPanel
-                    isLoadingGitHubFiles={isLoadingGitHubFiles}
                     isInstallingDeps={isInstallingDeps}
                     isStartingDevServer={isStartingDevServer}
                   />
@@ -356,23 +367,6 @@ export const ChatPanel = ({
                       {formatErrorForDisplay(openRouterError)}
                     </div>
 
-                    {isGitHubRateLimitError && onRefreshRepository && (
-                      <div className="mt-4">
-                        <Button
-                          onClick={onRefreshRepository}
-                          variant="outline"
-                          className="flex items-center gap-2 text-[#969798] hover:text-[#f3f6f6] hover:bg-[#212122] border-[#313133]"
-                          disabled={isLoadingGitHubFiles}
-                        >
-                          {isLoadingGitHubFiles ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4" />
-                          )}
-                          Use cached repository data
-                        </Button>
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -490,10 +484,35 @@ export const ChatPanel = ({
 
               {/* Add a dropdown to select llm model*/}
               <div className="flex items-center gap-2">
-                <Icons.sparkles className={cn(
-                  "h-4 w-4",
-                  enhancingPrompt && "animate-pulse"
-                )} />
+                <button
+                  type="button"
+                  className="text-gray-400 hover:text-gray-300 transition-colors cursor-pointer disabled:opacity-50"
+                  onClick={() =>
+                    enhancePrompt(input, setInput, model)
+                  }
+                  disabled={enhancingPrompt || input.length === 0}
+                >
+                  <Icons.sparkles
+                    className={`w-4 h-4 ${enhancingPrompt ? "animate-pulse" : ""}`}
+                  />
+                </button>
+
+                <button
+                  type="button"
+                  className={cn(
+                    "transition-colors cursor-pointer disabled:opacity-50",
+                    webSearchEnabled
+                      ? "text-blue-400 hover:text-blue-300"
+                      : "text-gray-400 hover:text-gray-300"
+                  )}
+                  onClick={toggleWebSearch}
+                  title={webSearchEnabled ? "Disable web search" : "Enable web search"}
+                >
+                  <div className='flex gap-1 items-center'>
+                    <Icons.search className={cn("w-4 h-4", webSearchEnabled && "text-blue-400")} />
+                    <p className={webSearchEnabled ? "text-blue-400" : ""}>Search</p>
+                  </div>
+                </button>
                 <ModelSelector
                   key={model}
                   model={model}

@@ -1,12 +1,8 @@
-//usePromptEnhancer.ts
 'use client';
 
+import { getAllApiKeysFromStorage } from '@/lib/api-keys';
+import { DEFAULT_PROVIDER } from '@/lib/provider';
 import { useState } from 'react';
-
-interface ProviderInfo {
-  name: string;
-  [key: string]: any;
-}
 
 export function usePromptEnhancer() {
   const [enhancingPrompt, setEnhancingPrompt] = useState(false);
@@ -21,17 +17,20 @@ export function usePromptEnhancer() {
     input: string,
     setInput: (value: string) => void,
     model: string,
-    provider: ProviderInfo,
   ) => {
     if (!input.trim()) return;
 
     setEnhancingPrompt(true);
     setPromptEnhanced(false);
 
+    // Get API keys from localStorage
+    const apiKeys = getAllApiKeysFromStorage();
+
     const requestBody = {
       message: input,
       model,
-      provider,
+      provider: DEFAULT_PROVIDER,
+      apiKeys,
     };
 
     try {

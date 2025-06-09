@@ -8,26 +8,19 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ApiKeyCache } from "@/lib/api-key-cache";
+import { getAllApiKeysFromStorage, setApiKeyInStorage } from "@/lib/api-keys";
 import { DEFAULT_PROVIDER } from "@/lib/provider";
 import { Check, Eye, EyeOff, Loader2, Pencil, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
-interface ApiKey {
-    id: string;
-    name: string;
-    provider: string;
-    key: string;
-    createdAt: string;
-}
-
 interface ModalUpdateApiKeysProps {
     open: boolean;
     setOpen: (open: boolean) => void;
+    userId?: string | null;
 }
 
-export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeysProps) {
-    const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
+export default function ModalUpdateApiKeys({ open, setOpen, userId }: ModalUpdateApiKeysProps) {
+    const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
     const [isLoading, setIsLoading] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
     const [isVerifying, setIsVerifying] = useState(false);
@@ -37,56 +30,24 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
 
-    // Load API keys when modal opens - try cache first, then database
-    const loadApiKeys = useCallback(async () => {
+    // Load API keys from localStorage when modal opens
+    const loadApiKeys = useCallback(() => {
         if (!open) return;
 
         try {
             setIsLoading(true);
             setError(null);
 
-            // Try to get from cache first
-            const cachedKeys = ApiKeyCache.getAll();
-            const providers = [DEFAULT_PROVIDER.name]; // Add more providers as needed
-
-            if (Object.keys(cachedKeys).length > 0) {
-                const mockApiKeys: ApiKey[] = providers
-                    .filter(provider => cachedKeys[provider])
-                    .map(provider => ({
-                        id: 'cached',
-                        name: `${provider} API Key`,
-                        provider: provider,
-                        key: cachedKeys[provider],
-                        createdAt: new Date().toISOString()
-                    }));
-
-                setApiKeys(mockApiKeys);
-                setIsLoading(false);
-                return;
-            }
-
-            // If not in cache, fetch from database
-            const response = await fetch('/api/api-keys');
-
-            if (response.ok) {
-                const data = await response.json();
-                setApiKeys(data.apiKeys || []);
-
-                // Update cache with fresh data
-                data.apiKeys?.forEach((apiKey: ApiKey) => {
-                    ApiKeyCache.set(apiKey.provider, apiKey.key);
-                });
-            } else {
-                const errorData = await response.json();
-                setError(errorData.error || 'Failed to load API keys');
-            }
+            // Get all API keys from localStorage
+            const cachedKeys = getAllApiKeysFromStorage(userId);
+            setApiKeys(cachedKeys);
         } catch (error) {
             console.error('Error loading API keys:', error);
             setError('Failed to load API keys');
         } finally {
             setIsLoading(false);
         }
-    }, [open]);
+    }, [open, userId]);
 
     useEffect(() => {
         loadApiKeys();
@@ -135,39 +96,20 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
         try {
             setIsSaving(true);
 
-            const response = await fetch('/api/api-keys', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    name: `${editingProvider} API Key`,
-                    provider: editingProvider,
-                    key: tempKey,
-                }),
-            });
+            // Save to localStorage
+            setApiKeyInStorage(editingProvider, tempKey, userId);
 
-            if (response.ok) {
-                const data = await response.json();
+            // Update local state
+            setApiKeys(prev => ({
+                ...prev,
+                [editingProvider]: tempKey
+            }));
 
-                // Update local state
-                setApiKeys(prev => {
-                    const filtered = prev.filter(key => key.provider !== editingProvider);
-                    return [...filtered, data.apiKey];
-                });
+            setEditingProvider(null);
+            setTempKey("");
+            setSuccess('API key updated successfully!');
 
-                // Update cache
-                ApiKeyCache.set(editingProvider, data.apiKey.key);
-
-                setEditingProvider(null);
-                setTempKey("");
-                setSuccess('API key updated successfully!');
-
-                setTimeout(() => setSuccess(null), 3000);
-            } else {
-                const errorData = await response.json();
-                setError(errorData.error || 'Failed to save API key');
-            }
+            setTimeout(() => setSuccess(null), 3000);
         } catch (error) {
             console.error('Error saving API key:', error);
             setError('Failed to save API key. Please try again.');
@@ -177,9 +119,9 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
     };
 
     const handleEdit = (provider: string) => {
-        const existingKey = apiKeys.find(key => key.provider === provider);
+        const existingKey = apiKeys[provider];
         setEditingProvider(provider);
-        setTempKey(existingKey?.key || "");
+        setTempKey(existingKey || "");
         setError(null);
         setSuccess(null);
     };
@@ -200,7 +142,7 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
 
     const providers = [DEFAULT_PROVIDER]; // Add more providers here as needed
     const getCurrentApiKey = (provider: string) => {
-        return apiKeys.find(key => key.provider === provider);
+        return apiKeys[provider] || "";
     };
 
     return (
@@ -221,7 +163,7 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
                         providers.map((provider) => {
                             const currentKey = getCurrentApiKey(provider.name);
                             const isEditing = editingProvider === provider.name;
-                            const hasKey = Boolean(currentKey?.key);
+                            const hasKey = Boolean(currentKey);
 
                             return (
                                 <div key={provider.name} className="space-y-2">
@@ -279,7 +221,7 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
                                             <div className="flex-1 relative">
                                                 <Input
                                                     type={showKey[provider.name] ? "text" : "password"}
-                                                    value={currentKey?.key || ""}
+                                                    value={currentKey}
                                                     placeholder={hasKey ? "API key configured" : "No API key set"}
                                                     className="border border-[#313133] rounded bg-[#1a1a1c] text-white pr-24"
                                                     disabled
@@ -343,14 +285,6 @@ export default function ModalUpdateApiKeys({ open, setOpen }: ModalUpdateApiKeys
                         </div>
                     )}
                 </div>
-
-                {/* <DialogFooter className="sm:justify-end">
-                    <DialogClose asChild>
-                        <Button variant="secondary" className="border-gray-600 text-gray-300 hover:bg-gray-700">
-                            Close
-                        </Button>
-                    </DialogClose>
-                </DialogFooter> */}
             </DialogContent>
         </Dialog>
     );

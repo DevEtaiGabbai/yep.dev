@@ -1,22 +1,20 @@
 'use client';
 
-import { motion } from 'framer-motion';
-import { MessageSquare, Loader2, Terminal, Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { motion } from 'framer-motion';
+import { Check, MessageSquare, Terminal } from 'lucide-react';
 
 interface LoadingProgressPanelProps {
-  isLoadingGitHubFiles: boolean;
   isInstallingDeps: boolean;
   isStartingDevServer: boolean;
 }
 
-export const LoadingProgressPanel = ({ 
-  isLoadingGitHubFiles, 
-  isInstallingDeps, 
-  isStartingDevServer 
+export const LoadingProgressPanel = ({
+  isInstallingDeps,
+  isStartingDevServer
 }: LoadingProgressPanelProps) => {
   return (
-    <motion.div 
+    <motion.div
       className="flex flex-col w-full mb-4"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
@@ -30,7 +28,7 @@ export const LoadingProgressPanel = ({
           <div className="text-sm text-[#f3f6f6] mb-4">
             I&apos;m importing your project into the WebContainer. This may take a moment as I set everything up.
           </div>
-          
+
           <div className="border border-[#313133] overflow-hidden rounded-lg w-full shadow-md">
             <div className="p-4 bg-[#161618] text-[#f3f6f6] font-medium border-b border-[#313133]">
               Importing Project
@@ -39,43 +37,30 @@ export const LoadingProgressPanel = ({
               <ul className="list-none space-y-4">
                 <li>
                   <div className="flex items-center gap-2 mb-1 text-sm">
-                    {/* Files loading status */}
-                    {isLoadingGitHubFiles === true ? (
-                      <div 
-                        className="h-5 w-5 rounded-full border-2 border-t-transparent border-blue-400 animate-spin"
-                      />
-                    ) : !isLoadingGitHubFiles ? (
-                      <div 
-                        className="h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center"
-                      >
-                        <Check className="h-3 w-3 text-blue-400" />
-                      </div>
-                    ) : (
-                      <div className="h-5 w-5 rounded-full border border-[#313133] flex items-center justify-center">
-                        <div className="h-2 w-2 rounded-full bg-[#313133]" />
-                      </div>
-                    )}
-                    <div className={cn(
-                      isLoadingGitHubFiles === true
-                        ? "text-blue-400" 
-                        : !isLoadingGitHubFiles
-                          ? "text-[#f3f6f6]" 
-                          : "text-[#969798]"
+                    <div
+                      className="h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center"
+                    >
+                      <Check className="h-3 w-3 text-blue-400" />
+                    </div>
+
+                    <div className={cn("text-[#f3f6f6]"
                     )}>
                       Loading project files
                     </div>
                   </div>
+
+
                 </li>
-                
+
                 <li>
                   <div className="flex items-center gap-2 mb-1 text-sm">
                     {/* Deps installation status */}
                     {isInstallingDeps === true ? (
-                      <div 
+                      <div
                         className="h-5 w-5 rounded-full border-2 border-t-transparent border-blue-400 animate-spin"
                       />
-                    ) : isInstallingDeps === false && !isLoadingGitHubFiles ? (
-                      <div 
+                    ) : isInstallingDeps === false ? (
+                      <div
                         className="h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center"
                       >
                         <Check className="h-3 w-3 text-blue-400" />
@@ -87,16 +72,16 @@ export const LoadingProgressPanel = ({
                     )}
                     <div className={cn(
                       isInstallingDeps === true
-                        ? "text-blue-400" 
-                        : isInstallingDeps === false && !isLoadingGitHubFiles
-                          ? "text-[#f3f6f6]" 
+                        ? "text-blue-400"
+                        : isInstallingDeps === false
+                          ? "text-[#f3f6f6]"
                           : "text-[#969798]"
                     )}>
                       Install dependencies
                     </div>
                   </div>
                   {(isInstallingDeps === true) && (
-                    <motion.div 
+                    <motion.div
                       className="text-xs border border-[#313133] rounded-md p-2 bg-[#101012] font-mono mt-2 mb-2"
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
@@ -106,16 +91,16 @@ export const LoadingProgressPanel = ({
                     </motion.div>
                   )}
                 </li>
-                
+
                 <li>
                   <div className="flex items-center gap-2 mb-1 text-sm">
                     {/* Server starting status */}
                     {isStartingDevServer === true ? (
-                      <div 
+                      <div
                         className="h-5 w-5 rounded-full border-2 border-t-transparent border-blue-400 animate-spin"
                       />
-                    ) : isStartingDevServer === false && !isInstallingDeps && !isLoadingGitHubFiles ? (
-                      <div 
+                    ) : isStartingDevServer === false && !isInstallingDeps ? (
+                      <div
                         className="h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center"
                       >
                         <Terminal className="h-3 w-3 text-blue-400" />
@@ -127,16 +112,16 @@ export const LoadingProgressPanel = ({
                     )}
                     <div className={cn(
                       isStartingDevServer === true
-                        ? "text-blue-400" 
-                        : isStartingDevServer === false && !isInstallingDeps && !isLoadingGitHubFiles
-                          ? "text-blue-400" 
+                        ? "text-blue-400"
+                        : isStartingDevServer === false && !isInstallingDeps
+                          ? "text-blue-400"
                           : "text-[#969798]"
                     )}>
                       Start application
                     </div>
                   </div>
-                  {(isStartingDevServer === true || (isStartingDevServer === false && !isInstallingDeps && !isLoadingGitHubFiles)) && (
-                    <motion.div 
+                  {(isStartingDevServer === true || (isStartingDevServer === false && !isInstallingDeps)) && (
+                    <motion.div
                       className="text-xs border border-[#313133] rounded-md p-2 bg-[#101012] font-mono mt-2"
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: "auto" }}
@@ -149,8 +134,8 @@ export const LoadingProgressPanel = ({
               </ul>
             </div>
           </div>
-          {isStartingDevServer === true || (isStartingDevServer === false && !isInstallingDeps && !isLoadingGitHubFiles) && (
-            <motion.p 
+          {isStartingDevServer === true || (isStartingDevServer === false && !isInstallingDeps) && (
+            <motion.p
               className="text-sm text-[#f3f6f6] mt-4"
               initial={{ opacity: 0, y: 5 }}
               animate={{ opacity: 1, y: 0 }}
@@ -163,4 +148,4 @@ export const LoadingProgressPanel = ({
       </div>
     </motion.div>
   );
-}; 
+};

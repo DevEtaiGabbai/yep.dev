@@ -3,6 +3,7 @@
 
 import { $workbench, addPreview, removePreview, updateFileInWorkbench } from '@/app/lib/stores/workbenchStore'; // Import workbench store and actions
 import { TerminalRef } from '@/components/Terminal';
+import { loadFilesIntoWorkbench, startFileSystemWatcher } from '@/lib/fileSync';
 import { webContainerManager } from '@/lib/WebContainerManager';
 import { terminalActions } from '@/stores/terminal';
 import { WebContainer, WebContainerProcess } from '@webcontainer/api';
@@ -19,7 +20,6 @@ const isBrowser = (() => {
 
 export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null>) => {
   const [webContainerInstance, setWebContainerInstance] = useState<WebContainer | null>(null);
-  const [isInitializingWebContainer, setIsInitializingWebContainer] = useState(true);
   const [isInstallingDeps, setIsInstallingDeps] = useState(false);
   const [isStartingDevServer, setIsStartingDevServer] = useState(false);
   const [initializationError, setInitializationError] = useState<string | null>(null);
@@ -29,6 +29,7 @@ export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null
   const npmInstallAttemptsRef = useRef(0);
   // const persistentShell = webContainerManager.getPersistentShell();
   const persistentShell = isBrowser ? webContainerManager.getPersistentShell() : null;
+  const fileWatcherCleanupRef = useRef<(() => void) | null>(null);
 
   const commandQueueRef = useRef<{ command: string; terminalId: string; resolve: (result: { exitCode: number }) => void }[]>([]);
 
@@ -258,7 +259,7 @@ export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null
         console.warn('Failed to create .npmrc file:', e);
       }
 
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     terminalRef.current?.writeToTerminal('\r\n\u001b[1;34m$ npm install\u001b[0m\r\n');
@@ -456,17 +457,50 @@ export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null
     }
   }, [webContainerInstance, terminalRef]);
 
+  // Add global error handler for WebSocket token errors
+  useEffect(() => {
+    const originalError = window.onerror;
+    const originalUnhandledRejection = window.onunhandledrejection;
+
+    const errorHandler: OnErrorEventHandler = (message, source, lineno, colno, error) => {
+      const messageStr = String(message);
+      if (messageStr.includes('__WS_TOKEN__') || messageStr.includes('WS_TOKEN')) {
+        console.warn('Filtered non-critical Vite WebSocket error:', messageStr);
+        terminalRef?.current?.writeToTerminal(`\r\n\u001b[33m[Filtered] Vite WebSocket warning: ${messageStr}\u001b[0m\r\n`);
+        return true; // Prevent default error handling
+      }
+      return originalError ? originalError.call(window, message, source, lineno, colno, error) : false;
+    };
+
+    const rejectionHandler = (event: PromiseRejectionEvent) => {
+      const message = String(event.reason);
+      if (message.includes('__WS_TOKEN__') || message.includes('WS_TOKEN')) {
+        console.warn('Filtered non-critical Vite WebSocket rejection:', message);
+        terminalRef?.current?.writeToTerminal(`\r\n\u001b[33m[Filtered] Vite WebSocket rejection: ${message}\u001b[0m\r\n`);
+        event.preventDefault();
+        return;
+      }
+      return originalUnhandledRejection ? originalUnhandledRejection.call(window, event) : undefined;
+    };
+
+    window.onerror = errorHandler;
+    window.onunhandledrejection = rejectionHandler;
+
+    return () => {
+      window.onerror = originalError;
+      window.onunhandledrejection = originalUnhandledRejection;
+    };
+  }, [terminalRef]);
+
   useEffect(() => {
     if (initAttemptedRef.current) return;
     initAttemptedRef.current = true;
 
-    setIsInitializingWebContainer(true);
     setInitializationError(null);
 
     webContainerManager.getWebContainer()
       .then(wc => {
         setWebContainerInstance(wc);
-        setIsInitializingWebContainer(false);
         if (terminalRef?.current) {
           terminalRef.current.writeToTerminal('\r\n\u001b[32mWebContainer booted successfully\u001b[0m\r\n');
         }
@@ -487,9 +521,17 @@ export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null
         const disposeError = wc.on('error', (errorEvent: { message: string } | any) => {
           console.error('WebContainer error:', errorEvent);
           const errorMessage = typeof errorEvent.message === 'string' ? errorEvent.message : String(errorEvent);
+
+          // Filter out common non-critical WebSocket errors from Vite dev servers
+          if (errorMessage.includes('__WS_TOKEN__') || errorMessage.includes('WS_TOKEN') ||
+            errorMessage.includes('net::ERR_ABORTED 500') && errorMessage.includes('webcontainer-api.io')) {
+            console.warn('Non-critical Vite WebSocket error filtered:', errorMessage);
+            terminalRef?.current?.writeToTerminal(`\r\n\u001b[33mVite WebSocket warning (non-critical): ${errorMessage}\u001b[0m\r\n`);
+            return;
+          }
+
           setInitializationError(`WebContainer error: ${errorMessage}`);
           terminalRef?.current?.writeToTerminal(`\r\n\u001b[31mWebContainer Error: ${errorMessage}\u001b[0m\r\n`);
-          setIsInitializingWebContainer(false);
           setIsInstallingDeps(false);
           if (isStartingDevServer) {
             setIsStartingDevServer(false);
@@ -499,18 +541,40 @@ export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null
           }
         });
 
+        // Start file system watcher for auto-refresh
+        const initializeFileWatcher = async () => {
+          try {
+            // Initial load of files into workbench
+            await loadFilesIntoWorkbench(wc, 'initial');
+
+            // Start auto-refresh every 500ms
+            const cleanup = startFileSystemWatcher(wc, 500);
+            fileWatcherCleanupRef.current = cleanup;
+          } catch (error) {
+            console.warn('Failed to start file system watcher:', error);
+          }
+        };
+
+        // Run file watcher initialization asynchronously
+        initializeFileWatcher();
+
         // Return cleanup function for listeners
         return () => {
           disposeServerReady();
           disposePortEvent();
           disposeError();
+
+          // Cleanup file watcher
+          if (fileWatcherCleanupRef.current) {
+            fileWatcherCleanupRef.current();
+            fileWatcherCleanupRef.current = null;
+          }
         };
       })
       .catch(error => {
         console.error('WebContainer initialization failed:', error);
         const errorMsg = `Failed to initialize WebContainer: ${error instanceof Error ? error.message : String(error)}`;
         setInitializationError(errorMsg);
-        setIsInitializingWebContainer(false);
         if (terminalRef?.current) {
           terminalRef.current.writeToTerminal(`\r\n\u001b[31mWebContainer Boot Error: ${errorMsg}\u001b[0m\r\n`);
         }
@@ -583,7 +647,6 @@ export const useWebContainer = (terminalRef: MutableRefObject<TerminalRef | null
   return {
     webContainerInstance,
     previews: $workbench.get().previews,
-    isInitializingWebContainer,
     isInstallingDeps,
     isStartingDevServer,
     initializationError,

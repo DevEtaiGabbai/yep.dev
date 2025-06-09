@@ -1,15 +1,15 @@
-// components/Terminal.tsx
 'use client';
 
-import { CanvasAddon } from '@xterm/addon-canvas'; // For better rendering performance
+import { CanvasAddon } from '@xterm/addon-canvas';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
-import { WebglAddon } from '@xterm/addon-webgl'; // For even better rendering performance, if available
+import { WebglAddon } from '@xterm/addon-webgl';
 import { ITerminalOptions, ITheme, Terminal as XTerm } from '@xterm/xterm';
 import React, { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 
-import { useWebContainer } from '@/hooks/useWebContainer'; // To interact with WebContainer
+import { useWebContainer } from '@/hooks/useWebContainer';
 import { cn } from '@/lib/utils';
+import { webContainerManager } from '@/lib/WebContainerManager';
 import { terminalActions } from '@/stores/terminal';
 
 import { WebContainer, WebContainerProcess } from '@webcontainer/api';
@@ -21,25 +21,25 @@ export interface TerminalRef {
   clearTerminal: () => void;
   focus: () => void;
   getDimensions: () => { cols: number; rows: number };
-  resize: () => void; // Add resize method
-  sendInput: (data: string) => void; // Method to send input to the shell process
+  resize: () => void;
+  sendInput: (data: string) => void;
 }
 
 interface TerminalProps {
-  id: string; // Unique ID for this terminal instance (e.g., 'bolt', 'terminal_1')
+  id: string;
   active?: boolean;
   className?: string;
-  onCommand?: (command: string, terminalId: string) => void; // Callback when a command is entered
+  onCommand?: (command: string, terminalId: string) => void;
   onResize?: (cols: number, rows: number) => void;
   initialOptions?: Partial<ITerminalOptions>;
-  webContainerInstance?: WebContainer | null; // Pass WebContainer instance if already available
+  webContainerInstance?: WebContainer | null;
 }
 
 const defaultTheme: ITheme = {
   background: '#151718',
   foreground: '#D1D5DB',
   cursor: '#A0A0A0',
-  selectionBackground: 'rgba(59, 130, 246, 0.3)', // Semi-transparent blue
+  selectionBackground: 'rgba(59, 130, 246, 0.3)',
   black: '#1E1E1E',
   red: '#FF5555',
   green: '#50FA7B',
@@ -76,8 +76,75 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
     const dataListenerDisposableRef = useRef<{ dispose: () => void } | null>(null);
     const sessionIdRef = useRef<string>(`${id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`);
     const dataListenerSetupRef = useRef<boolean>(false);
+    const terminalInitializedRef = useRef<boolean>(false);
 
     const { webContainerInstance } = useWebContainer(ref as React.MutableRefObject<TerminalRef | null>);
+
+    // Set up the imperative handle early so ref is available for shell initialization
+    useImperativeHandle(ref, () => ({
+      terminal: xtermRef.current,
+      writeToTerminal: (text: string) => {
+        if (isMountedRef.current && xtermRef.current) {
+          if (id === 'bolt') {
+            // For bolt terminal, always write directly as the persistent shell handles everything
+            xtermRef.current.write(text);
+          } else if (shellReadyRef.current && shellProcessRef.current) {
+            xtermRef.current.write(text);
+          } else if (shellErrorRef.current && !shellErrorMsgShownRef.current) {
+            xtermRef.current.write('\r\n\x1b[31mShell not initialized\x1b[0m\r\n');
+            shellErrorMsgShownRef.current = true;
+            messageQueueRef.current.push(text);
+          } else if (!shellReadyRef.current && !shellErrorRef.current) {
+            messageQueueRef.current.push(text);
+          }
+        }
+      },
+      clearTerminal: () => {
+        if (isMountedRef.current && xtermRef.current) {
+          xtermRef.current.clear();
+          if (shellReadyRef.current) {
+            xtermRef.current.write('❯ ');
+          }
+        }
+      },
+      focus: () => {
+        if (isMountedRef.current) {
+          xtermRef.current?.focus();
+        }
+      },
+      getDimensions: () => ({
+        cols: (isMountedRef.current && xtermRef.current?.cols) || 80,
+        rows: (isMountedRef.current && xtermRef.current?.rows) || 24
+      }),
+      resize: () => {
+        if (isMountedRef.current && fitAddonRef.current && terminalElRef.current) {
+          try {
+            fitAddonRef.current.fit();
+          } catch (e) {
+            console.warn(`Terminal (${id}): Error during manual resize:`, e);
+          }
+        }
+      },
+      sendInput: (data: string) => {
+        if (isMountedRef.current) {
+          if (id === 'bolt') {
+            // For bolt terminal, the BoltShell class handles input automatically via its onData listener
+            // The input is already being processed, so no manual intervention needed
+            console.log(`Terminal (${id}): Input handled by BoltShell onData listener: "${data}"`);
+          } else if (shellReadyRef.current && shellProcessRef.current) {
+            try {
+              const writer = shellProcessRef.current.input.getWriter();
+              writer.write(data).catch(e => console.error(`Terminal (${id}) sendInput error:`, e));
+              writer.releaseLock();
+            } catch (e) {
+              console.error(`Terminal (${id}) sendInput writer error:`, e);
+            }
+          } else {
+            messageQueueRef.current.push(data);
+          }
+        }
+      }
+    }), [id]);
 
     // Process queued messages when shell becomes ready
     const processMessageQueue = () => {
@@ -103,8 +170,8 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
         cleanupAbortControllerRef.current = null;
       }
 
-      // Dispose of data listener
-      if (dataListenerDisposableRef.current) {
+      // Dispose of data listener (only for non-bolt terminals)
+      if (id !== 'bolt' && dataListenerDisposableRef.current) {
         try {
           dataListenerDisposableRef.current.dispose();
         } catch (e) {
@@ -123,8 +190,9 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
         resizeObserverRef.current = null;
       }
 
-      // Kill shell process safely
-      if (shellProcessRef.current) {
+      // For non-bolt terminals, kill the shell process
+      // For bolt terminal, preserve the persistent shell
+      if (id !== 'bolt' && shellProcessRef.current) {
         try {
           shellProcessRef.current.kill();
           console.log(`Terminal (${id}): Shell process killed`);
@@ -147,12 +215,15 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
 
       // Reset all refs and states
       fitAddonRef.current = null;
-      shellReadyRef.current = false;
+      if (id !== 'bolt') {
+        shellReadyRef.current = false;
+      }
       shellErrorRef.current = false;
       shellErrorMsgShownRef.current = false;
       isSpawningRef.current = false;
       messageQueueRef.current = [];
       dataListenerSetupRef.current = false;
+      terminalInitializedRef.current = false;
     }, [id]);
 
     // Track mounted state
@@ -166,7 +237,7 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
 
     // Initialize terminal only once
     useEffect(() => {
-      if (!terminalElRef.current || !webContainerInstance || xtermRef.current || !isMountedRef.current) {
+      if (!terminalElRef.current || !webContainerInstance || xtermRef.current || !isMountedRef.current || terminalInitializedRef.current) {
         return;
       }
 
@@ -186,6 +257,7 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
 
         // Store term reference before any potential errors occur
         xtermRef.current = term;
+        terminalInitializedRef.current = true;
 
         const fitAddon = new FitAddon();
         fitAddonRef.current = fitAddon;
@@ -264,8 +336,109 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
           xtermRef.current = null;
         }
         fitAddonRef.current = null;
+        terminalInitializedRef.current = false;
       }
     }, [id, initialOptions, webContainerInstance, onResize, cleanupTerminal]);
+
+    // Initialize Bolt terminal with persistent shell
+    useEffect(() => {
+      if (id !== 'bolt' || !xtermRef.current || !webContainerInstance ||
+        !isMountedRef.current || isSpawningRef.current || shellReadyRef.current) {
+        return;
+      }
+
+      const initializeBoltShell = async () => {
+        if (!isMountedRef.current || !xtermRef.current) return;
+
+        isSpawningRef.current = true;
+        const term = xtermRef.current;
+
+        try {
+          // Get the persistent shell from WebContainerManager
+          const persistentShell = webContainerManager.getPersistentShell();
+
+          if (!persistentShell.isInitialized()) {
+            // Initialize the persistent shell
+            term.write('\r\n\x1b[36mInitializing Bolt shell...\x1b[0m\r\n');
+
+            // Create a TerminalRef object for the WebContainerManager
+            const terminalRefForShell: TerminalRef = {
+              terminal: xtermRef.current,
+              writeToTerminal: (text: string) => {
+                if (xtermRef.current) {
+                  xtermRef.current.write(text);
+                }
+              },
+              clearTerminal: () => {
+                if (xtermRef.current) {
+                  xtermRef.current.clear();
+                }
+              },
+              focus: () => {
+                if (xtermRef.current) {
+                  xtermRef.current.focus();
+                }
+              },
+              getDimensions: () => ({
+                cols: xtermRef.current?.cols || 80,
+                rows: xtermRef.current?.rows || 24
+              }),
+              resize: () => {
+                if (fitAddonRef.current) {
+                  fitAddonRef.current.fit();
+                }
+              },
+              sendInput: (data: string) => {
+                // Input will be handled by the shell's onData listener
+              }
+            };
+            await webContainerManager.initializeShell(terminalRefForShell);
+
+            if (!isMountedRef.current) {
+              isSpawningRef.current = false;
+              return;
+            }
+          } else {
+            // Restore the persistent shell with this terminal
+            term.write('\r\n\x1b[36mRestoring Bolt shell...\x1b[0m\r\n');
+
+            if (persistentShell.restore && term) {
+              await persistentShell.restore(term);
+            }
+          }
+
+          shellReadyRef.current = true;
+          shellErrorRef.current = false;
+
+          if (terminalActions) {
+            terminalActions.setTerminalInteractive(id, true);
+            terminalActions.setTerminalRunning(id, false);
+          }
+
+        } catch (error) {
+          if (!isMountedRef.current) return;
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          console.error(`Terminal (${id}): Failed to initialize Bolt shell:`, errorMsg);
+          shellErrorRef.current = true;
+          shellReadyRef.current = false;
+          if (term) term.write(`\r\n\x1b[31mError initializing Bolt shell: ${errorMsg}\x1b[0m\r\n`);
+          if (terminalActions) {
+            terminalActions.setTerminalInteractive(id, false);
+            terminalActions.setTerminalRunning(id, false);
+          }
+        } finally {
+          isSpawningRef.current = false;
+        }
+      };
+
+      // Small delay to ensure terminal is fully ready
+      const initTimeout = setTimeout(initializeBoltShell, 500);
+
+      return () => {
+        clearTimeout(initTimeout);
+        isSpawningRef.current = false;
+      };
+    }, [id, webContainerInstance, ref]);
 
     // Improved shell spawning for standard terminals (non-bolt)
     useEffect(() => {
@@ -347,7 +520,6 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
 
             dataListenerDisposableRef.current = term.onData(data => {
               if (shellProcessRef.current === localShellProcess && isMountedRef.current && !signal.aborted) {
-                console.log(`Terminal (${id}): Received input data: "${data}" (session: ${sessionIdRef.current})`);
                 try {
                   const writer = shellProcessRef.current.input.getWriter();
                   writer.write(data).catch(e => {
@@ -365,8 +537,6 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
                 console.warn(`Terminal (${id}): Ignoring input data for inactive/aborted session`);
               }
             });
-          } else {
-            console.log(`Terminal (${id}): Data listener already set up, skipping`);
           }
 
           localShellProcess.exit.then(exitCode => {
@@ -419,177 +589,27 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
         clearTimeout(spawnTimeoutId);
         isSpawningRef.current = false;
       };
-    }, [id, webContainerInstance]);
+    }, [id, webContainerInstance, ref]);
 
-    // Special handling for bolt terminal - use standard shell for now
-    useEffect(() => {
-      if (id !== 'bolt' || !xtermRef.current || !webContainerInstance ||
-        shellProcessRef.current || !isMountedRef.current || isSpawningRef.current) {
-        return;
-      }
-
-      isSpawningRef.current = true;
-      const term = xtermRef.current;
-
-      console.log(`Terminal (${id}): Bolt shell effect triggered. Attempting to spawn.`);
-      if (terminalActions) {
-        terminalActions.setTerminalInteractive(id, false);
-        terminalActions.setTerminalRunning(id, true, 'Starting bolt shell...');
-      }
-      term.write('\r\n\x1b[36mStarting bolt shell...\x1b[0m\r\n');
-
-      const spawnBoltShell = async () => {
-        if (!isMountedRef.current || !webContainerInstance || !term) {
-          isSpawningRef.current = false;
-          return;
-        }
-
-        try {
-          const cols = term.cols > 0 ? term.cols : 80;
-          const rows = term.rows > 0 ? term.rows : 24;
-
-          // For now, use standard jsh shell for bolt terminal too
-          // TODO: Integrate with BoltShell from lib/shell.ts for advanced features
-          const localShellProcess = await webContainerInstance.spawn('jsh', [], {
-            terminal: { cols, rows }
-          });
-
-          if (!isMountedRef.current) {
-            localShellProcess.kill();
-            isSpawningRef.current = false;
-            return;
-          }
-
-          shellProcessRef.current = localShellProcess;
-          shellReadyRef.current = true;
-          shellErrorRef.current = false;
-
-          if (terminalActions?.registerProcessForSession) {
-            terminalActions.registerProcessForSession(id, localShellProcess);
-          }
-
-          // Create abort controller for this shell session
-          cleanupAbortControllerRef.current = new AbortController();
-          const signal = cleanupAbortControllerRef.current.signal;
-
-          localShellProcess.output.pipeTo(new WritableStream({
-            write(data) {
-              if (isMountedRef.current && term && !signal.aborted) {
-                term.write(data);
-              }
-            }
-          }), { signal }).catch(err => {
-            if (!signal.aborted && isMountedRef.current) {
-              console.error(`Terminal (${id}) output pipe error:`, err);
-              shellErrorRef.current = true;
-            }
-          });
-
-          // Dispose previous data listener before setting up new one
-          if (dataListenerDisposableRef.current) {
-            try {
-              console.log(`Terminal (${id}): Disposing previous data listener`);
-              dataListenerDisposableRef.current.dispose();
-            } catch (e) {
-              console.warn(`Terminal (${id}): Error disposing previous data listener:`, e);
-            }
-            dataListenerDisposableRef.current = null;
-            dataListenerSetupRef.current = false;
-          }
-
-          if (!dataListenerSetupRef.current) {
-            console.log(`Terminal (${id}): Setting up new data listener for session ${sessionIdRef.current}`);
-            dataListenerSetupRef.current = true;
-
-            dataListenerDisposableRef.current = term.onData(data => {
-              if (shellProcessRef.current === localShellProcess && isMountedRef.current && !signal.aborted) {
-                console.log(`Terminal (${id}): Received input data: "${data}" (session: ${sessionIdRef.current})`);
-                try {
-                  const writer = shellProcessRef.current.input.getWriter();
-                  writer.write(data).catch(e => {
-                    if (!signal.aborted) {
-                      console.error(`Terminal (${id}) input write error:`, e);
-                    }
-                  });
-                  writer.releaseLock();
-                } catch (e) {
-                  if (!signal.aborted) {
-                    console.error(`Terminal (${id}) input writer error:`, e);
-                  }
-                }
-              } else {
-                console.warn(`Terminal (${id}): Ignoring input data for inactive/aborted session`);
-              }
-            });
-          } else {
-            console.log(`Terminal (${id}): Data listener already set up, skipping`);
-          }
-
-          localShellProcess.exit.then(exitCode => {
-            if (isMountedRef.current && term && !signal.aborted) {
-              term.write(`\r\n\x1b[33mBolt shell exited with code ${exitCode}\x1b[0m\r\n`);
-            }
-            if (terminalActions) {
-              terminalActions.setTerminalInteractive(id, false);
-              terminalActions.setTerminalRunning(id, false);
-            }
-            if (shellProcessRef.current === localShellProcess) {
-              shellProcessRef.current = null;
-            }
-            shellReadyRef.current = false;
-            isSpawningRef.current = false;
-          }).catch(err => {
-            if (isMountedRef.current && term && !signal.aborted) {
-              term.write(`\r\n\x1b[31mBolt shell error: ${err.message}\x1b[0m\r\n`);
-            }
-            shellErrorRef.current = true;
-            shellReadyRef.current = false;
-            isSpawningRef.current = false;
-          });
-
-          if (terminalActions) {
-            terminalActions.setTerminalInteractive(id, true);
-            terminalActions.setTerminalRunning(id, false);
-          }
-          term.write('❯ ');
-          isSpawningRef.current = false;
-
-        } catch (error) {
-          if (!isMountedRef.current) return;
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          console.error(`Terminal (${id}): Failed to spawn bolt shell:`, errorMsg);
-          shellErrorRef.current = true;
-          shellReadyRef.current = false;
-          if (term) term.write(`\r\n\x1b[31mError starting bolt shell: ${errorMsg}\x1b[0m\r\n`);
-          if (terminalActions) {
-            terminalActions.setTerminalInteractive(id, false);
-            terminalActions.setTerminalRunning(id, false);
-          }
-          isSpawningRef.current = false;
-        }
-      };
-
-      const spawnTimeoutId = setTimeout(spawnBoltShell, 250);
-
-      return () => {
-        clearTimeout(spawnTimeoutId);
-        isSpawningRef.current = false;
-      };
-    }, [id, webContainerInstance]);
-
-    // Handle active terminal focus and shell spawning
+    // Handle active terminal focus
     useEffect(() => {
       if (active && xtermRef.current && isMountedRef.current) {
         xtermRef.current.focus();
 
-        // For any terminal (including bolt), if there's no shell process and WebContainer is available, allow spawning
-        if (!shellProcessRef.current && !shellSpawnAttempted && webContainerInstance && !isSpawningRef.current) {
-          console.log(`Terminal (${id}): Active without shell, attempting to spawn now`);
-          setShellSpawnAttempted(true);
-          // The shell spawning logic is handled by the previous useEffects
+        // For bolt terminal, restore the persistent shell if needed
+        if (id === 'bolt' && shellReadyRef.current) {
+          const persistentShell = webContainerManager.getPersistentShell();
+          if (persistentShell.isInitialized() && xtermRef.current) {
+            try {
+              // Restore the shell with the current terminal
+              persistentShell.restore?.(xtermRef.current);
+            } catch (error) {
+              console.warn(`Terminal (${id}): Error restoring persistent shell on focus:`, error);
+            }
+          }
         }
       } else if (!active && xtermRef.current) {
-        // When terminal becomes inactive, ensure it's properly cleaned up but don't kill the shell
+        // When terminal becomes inactive, just remove focus but don't kill processes
         console.log(`Terminal (${id}): Became inactive, removing focus`);
         try {
           xtermRef.current.blur();
@@ -597,63 +617,7 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
           console.warn(`Terminal (${id}): Error blurring terminal:`, e);
         }
       }
-    }, [active, id, webContainerInstance, shellSpawnAttempted]);
-
-    useImperativeHandle(ref, () => ({
-      terminal: xtermRef.current,
-      writeToTerminal: (text: string) => {
-        if (isMountedRef.current && xtermRef.current) {
-          if (shellReadyRef.current && shellProcessRef.current) {
-            xtermRef.current.write(text);
-          } else if (shellErrorRef.current && !shellErrorMsgShownRef.current) {
-            xtermRef.current.write('\r\n\x1b[31mShell not initialized\x1b[0m\r\n');
-            shellErrorMsgShownRef.current = true;
-            messageQueueRef.current.push(text);
-          } else if (!shellReadyRef.current && !shellErrorRef.current) {
-            messageQueueRef.current.push(text);
-          }
-        }
-      },
-      clearTerminal: () => {
-        if (isMountedRef.current && xtermRef.current) {
-          xtermRef.current.clear();
-          if (shellReadyRef.current) {
-            xtermRef.current.write('❯ ');
-          }
-        }
-      },
-      focus: () => {
-        if (isMountedRef.current) {
-          xtermRef.current?.focus();
-        }
-      },
-      getDimensions: () => ({
-        cols: (isMountedRef.current && xtermRef.current?.cols) || 80,
-        rows: (isMountedRef.current && xtermRef.current?.rows) || 24
-      }),
-      resize: () => {
-        if (isMountedRef.current && fitAddonRef.current && terminalElRef.current) {
-          try {
-            fitAddonRef.current.fit();
-          } catch (e) {
-            console.warn(`Terminal (${id}): Error during manual resize:`, e);
-          }
-        }
-      },
-      sendInput: (data: string) => {
-        if (isMountedRef.current && shellReadyRef.current && shellProcessRef.current) {
-          try {
-            const writer = shellProcessRef.current.input.getWriter();
-            writer.write(data).catch(e => console.error(`Terminal (${id}) sendInput error:`, e));
-            writer.releaseLock();
-          } catch (e) {
-            console.error(`Terminal (${id}) sendInput writer error:`, e);
-          }
-        } else if (isMountedRef.current) {
-          messageQueueRef.current.push(data);
-        }
-      }
-    }), [id]);
+    }, [active, id]);
 
     return (
       <div
@@ -664,8 +628,8 @@ export const Terminal = memo(forwardRef<TerminalRef, TerminalProps>(
       >
         <div
           ref={terminalElRef}
-          className="h-full w-full" // xterm will fill this
-          style={{ padding: '4px 8px' }} // Add some padding
+          className="h-full w-full"
+          style={{ padding: '4px 8px' }}
         />
       </div>
     );

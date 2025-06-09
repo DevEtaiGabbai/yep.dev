@@ -1,5 +1,6 @@
 "use client"
 
+import ModalUpdateApiKeys from "@/components/ModalUpdateApiKeys"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,10 +21,9 @@ import {
   Sparkles,
 } from "lucide-react"
 import { signOut } from "next-auth/react"
-import { IoSettingsOutline } from "react-icons/io5"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import ModalUpdateApiKeys from "@/app/chat/ModalUpdateApiKeys"
+import { IoSettingsOutline } from "react-icons/io5"
 
 export function NavUser({
   user,
@@ -72,6 +72,7 @@ export function NavUser({
             <DropdownMenuTrigger asChild>
               <SidebarMenuButton
                 size="lg"
+                className="flex justify-center"
               >
                 <IoSettingsOutline />
               </SidebarMenuButton>

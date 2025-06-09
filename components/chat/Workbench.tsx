@@ -2,25 +2,23 @@
 'use client';
 
 import {
-    $workbench, acceptPendingAIChange, clearPendingAIChange,
+    $workbench,
     resetCurrentFile,
     saveCurrentFile,
     setSelectedFile,
     setWorkbenchView,
     toggleTerminal,
     toggleWorkbench,
-    type WorkbenchViewType,
+    type WorkbenchViewType
 } from '@/app/lib/stores/workbenchStore';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 import { toast } from '@/hooks/use-toast';
 import { useWebContainer } from '@/hooks/useWebContainer';
 import { getAllFilesFromWebContainer } from '@/lib/services/webContainerSync';
 import { useStore } from '@nanostores/react';
-import { CheckCircle, Download, XCircle } from 'lucide-react';
+import { Download } from 'lucide-react';
 import { useSession } from 'next-auth/react';
-import { useParams } from 'next/navigation';
 import { useCallback, useEffect, useState, type RefObject } from 'react';
-import { DiffPanel } from '../DiffPanel';
 import { EditorPanel } from '../EditorPanel';
 import { PreviewPanel } from '../PreviewPanel';
 import type { TerminalRef } from '../Terminal';
@@ -39,7 +37,6 @@ interface WorkbenchProps {
 
 const sliderOptions: Array<{ value: WorkbenchViewType; label: string }> = [
     { value: 'Editor', label: 'Code' },
-    { value: 'Diff', label: 'Diff' },
     { value: 'Preview', label: 'Preview' },
 ];
 
@@ -51,8 +48,6 @@ export function Workbench({
     projectId,
 }: WorkbenchProps) {
     const { data: session } = useSession();
-    const params = useParams();
-    const conversationId = typeof params.id === 'string' ? params.id : '';
 
     const workbenchState = useStore($workbench);
     const {
@@ -239,7 +234,7 @@ export function Workbench({
                             <CodePreviewTabTrigger
                                 key={option.value}
                                 value={option.value}
-                                disabled={pendingAIChange && option.value !== 'Diff'} // Disable other tabs during AI review
+                                disabled={pendingAIChange && option.value !== 'Diff'}
                                 className="px-3 py-1 text-xs h-full data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]"
                             >
                                 {option.label}
@@ -269,29 +264,6 @@ export function Workbench({
                     </Button> */}
                 </div>
 
-                {currentView === 'Diff' && pendingAIChange && (
-                    <div className="flex items-center space-x-1.5 ml-auto">
-                        <Button
-                            variant="default"
-                            size="sm"
-                            onClick={() => acceptPendingAIChange(webContainerInstance)}
-                            className="text-xs h-7 px-2 bg-green-600 hover:bg-green-700 text-white"
-                        >
-                            <CheckCircle className="h-3.5 w-3.5 mr-1" />
-                            Accept AI Changes
-                        </Button>
-                        <Button
-                            variant="destructive"
-                            size="sm"
-                            onClick={clearPendingAIChange}
-                            className="text-xs h-7 px-2"
-                        >
-                            <XCircle className="h-3.5 w-3.5 mr-1" />
-                            Discard AI Changes
-                        </Button>
-                    </div>
-                )}
-
                 <div className="ml-auto flex items-center space-x-1">
                     <Button
                         variant="ghost"
@@ -317,9 +289,8 @@ export function Workbench({
                 <ResizablePanel defaultSize={terminalVisible ? 70 : 100} minSize={20}>
                     <div className="h-full overflow-hidden">
                         {currentView === 'Editor' && (
-                            <EditorPanel isStreaming={isProcessingFiles && !streamingComplete} />
+                            <EditorPanel />
                         )}
-                        {currentView === 'Diff' && <DiffPanel />}
                         {currentView === 'Preview' && <PreviewPanel />}
                     </div>
                 </ResizablePanel>

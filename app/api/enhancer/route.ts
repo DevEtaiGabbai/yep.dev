@@ -1,12 +1,11 @@
 // app/api/enhancer/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserApiKey } from '@/lib/api-keys';
 
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
 export async function POST(request: NextRequest) {
   try {
-    const { message, model, provider } = await request.json();
+    const { message, model, provider, apiKeys } = await request.json();
 
     // Validate inputs
     if (!message || typeof message !== 'string') {
@@ -21,12 +20,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Invalid or missing provider' }, { status: 400 });
     }
 
-    // Get user's API key for OpenRouter
-    const userApiKey = await getUserApiKey('OpenRouter');
-    
+    // Get user's API key from client request
+    const userApiKey = apiKeys?.OpenRouter;
+
     if (!userApiKey) {
-      return NextResponse.json({ 
-        error: 'OpenRouter API key not found. Please add your API key in settings.' 
+      return NextResponse.json({
+        error: 'OpenRouter API key not found. Please add your API key in settings.'
       }, { status: 401 });
     }
 
@@ -43,7 +42,9 @@ export async function POST(request: NextRequest) {
               'X-Title': 'GeminiCoder',
             },
             body: JSON.stringify({
-              model: 'openai/gpt-4o-mini', // Always use this model for enhancing
+              // model: 'openai/gpt-4o-mini', // Always use this model for enhancing
+              model: 'deepseek/deepseek-chat-v3-0324:free',
+
               temperature: 0.1,
               messages: [
                 {
@@ -52,7 +53,7 @@ export async function POST(request: NextRequest) {
                 },
                 {
                   role: 'user',
-                  content: `[Model: ${model}]\n\n[Provider: ${provider.name}]\n\n` +
+                  content: `[Model: ${model}]\n\n[Provider: ${typeof provider === 'string' ? provider : provider.name}]\n\n` +
                     `You are a professional prompt engineer specializing in crafting precise, effective prompts.
                     Your task is to enhance prompts by making them more specific, actionable, and effective.
 

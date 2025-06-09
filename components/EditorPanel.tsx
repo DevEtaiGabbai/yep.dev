@@ -2,15 +2,15 @@
 'use client';
 
 import {
-  $workbench, handleEditorContentChange, // Import the main store
+  $workbench,
+  getFileLanguage,
+  handleEditorContentChange, // Import the main store
   setSelectedFile as setSelectedWorkbenchFile
 } from '@/app/lib/stores/workbenchStore';
 import { useStore } from '@nanostores/react';
 
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable';
 
-// import { useWebContainer } from '@/hooks/useWebContainer'; // Not directly needed if save/reset are higher up
-// import { toast } from '../ui/use-toast'; // Toasts are handled higher up
 import FileExplorer from '@/app/components/chat/FileExplorer';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { WORK_DIR } from '@/lib/prompt';
@@ -20,21 +20,9 @@ import CodeEditor2 from './chat/CodeEditor2';
 import { FileBreadcrumb } from './chat/FileBreadcrumb';
 import { SearchPanel } from './SearchPanel';
 
-
-
-interface EditorPanelProps {
-  // EditorPanel will now mostly read from the $workbench store.
-  // We might still pass down specific interaction handlers if they don't belong in the store.
-  isStreaming?: boolean; // Example: To make editor read-only during AI generation
-  // onFileSave: () => void; // Moved to Workbench.tsx header
-  // onFileReset: () => void; // Moved to Workbench.tsx header
-}
-
-export function EditorPanel({ isStreaming }: EditorPanelProps) {
+export function EditorPanel() {
   const workbenchState = useStore($workbench);
-  const { files, selectedFile, currentDocument, unsavedFiles } = workbenchState;
-  // Removed chatContainerRef
-  // const chatContainerRef = useRef<HTMLDivElement>(null);
+  const { files, selectedFile, currentDocument, unsavedFiles, streamingContent } = workbenchState;
 
   const handleFileSelectInTree = useCallback((filePath: string | undefined) => {
     setSelectedWorkbenchFile(filePath || null);
@@ -47,14 +35,17 @@ export function EditorPanel({ isStreaming }: EditorPanelProps) {
 
 
   const activeFileSegments = useMemo(() => {
-    if (!currentDocument?.filePath) return [];
+    // Use streaming content file path if available and no current document
+    const activeFilePath = currentDocument?.filePath || streamingContent?.filePath;
+    if (!activeFilePath) return [];
+
     // Ensure WORK_DIR is correctly used for relative path calculation
-    const pathWithoutWorkDir = currentDocument.filePath.startsWith(WORK_DIR + '/')
-      ? currentDocument.filePath.substring(WORK_DIR.length + 1)
-      : currentDocument.filePath.replace(/^\//, '');
+    const pathWithoutWorkDir = activeFilePath.startsWith(WORK_DIR + '/')
+      ? activeFilePath.substring(WORK_DIR.length + 1)
+      : activeFilePath.replace(/^\//, '');
 
     return [WORK_DIR.split('/').pop() || 'project', ...pathWithoutWorkDir.split('/')].filter(Boolean);
-  }, [currentDocument?.filePath]);
+  }, [currentDocument?.filePath, streamingContent?.filePath]);
 
 
   return (
@@ -64,7 +55,6 @@ export function EditorPanel({ isStreaming }: EditorPanelProps) {
           <TabsList className="bg-[#101012] border-b border-[#313133] rounded-none justify-start h-10">
             <TabsTrigger value="files" className="px-3 py-1.5 text-xs data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]">Files</TabsTrigger>
             <TabsTrigger value="search" className="px-3 py-1.5 text-xs data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]">Search</TabsTrigger>
-            {/* <TabsTrigger value="locks" className="px-3 py-1.5 text-xs data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]">Locks</TabsTrigger> */}
           </TabsList>
           <TabsContent value="files" className="flex-1 mt-0 overflow-hidden bg-[#101012]">
             <ScrollArea className="h-full w-full p-1">
@@ -82,30 +72,45 @@ export function EditorPanel({ isStreaming }: EditorPanelProps) {
           <TabsContent value="search" className="flex-1 overflow-auto mt-0">
             <SearchPanel />
           </TabsContent>
-          {/* <TabsContent value="locks" className="flex-1 overflow-auto mt-0">
-            <LockManager />
-          </TabsContent> */}
+
         </Tabs>
       </ResizablePanel>
       <ResizableHandle className="w-[1px] bg-[#313133]" />
       <ResizablePanel defaultSize={75} className="bg-[#101012] flex flex-col min-w-0">
         <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#313133] bg-[#161618] flex-shrink-0 h-10">
-          {currentDocument?.filePath ? (
-            <FileBreadcrumb
-              pathSegments={activeFileSegments}
-              onFileSelect={handleFileSelectInTree}
-            />
+          {(currentDocument?.filePath || streamingContent?.filePath) ? (
+            <div className="flex items-center gap-2">
+              <FileBreadcrumb
+                pathSegments={activeFileSegments}
+                onFileSelect={handleFileSelectInTree}
+              />
+              {streamingContent && (
+                <div className="flex items-center gap-1 px-2 py-0.5 bg-blue-600/20 border border-blue-500/30 rounded text-blue-400 text-xs">
+                  <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse" />
+                  Streaming...
+                </div>
+              )}
+            </div>
           ) : (
             <span className="text-xs text-[#969798]">No file selected</span>
           )}
         </div>
         <div className="flex-1 relative min-h-0">
-          {currentDocument?.filePath && currentDocument && !currentDocument.isBinary ? (
+          {((currentDocument?.filePath && currentDocument && !currentDocument.isBinary) || streamingContent) ? (
             <CodeEditor2
-              value={currentDocument.value}
+              value={
+                streamingContent &&
+                  (streamingContent.filePath === currentDocument?.filePath || !currentDocument?.filePath)
+                  ? streamingContent.content
+                  : currentDocument?.value || ''
+              }
               onChange={handleEditorChange}
-              language={currentDocument.language || 'plaintext'}
-            // readOnly={isStreaming || currentDocument.isLocked}
+              language={
+                streamingContent && !currentDocument?.filePath
+                  ? getFileLanguage(streamingContent.filePath.split('/').pop() || '')
+                  : currentDocument?.language || 'plaintext'
+              }
+              readOnly={streamingContent !== null}
             />
           ) : currentDocument?.isBinary ? (
             <div className="flex items-center justify-center h-full text-[#969798] text-sm">

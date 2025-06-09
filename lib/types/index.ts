@@ -62,7 +62,7 @@ export interface Template {
   name: string;
   label: string;
   description: string;
-  githubRepo: string;
+  cloudFrontUrl: string;
   tags: string[];
   icon: string;
 }

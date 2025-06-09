@@ -1,5 +1,5 @@
 import { IconButton } from "@/components/ui/IconButton";
-import { ApiKeyCache } from "@/lib/api-key-cache";
+import { getApiKeyFromStorage, setApiKeyInStorage } from "@/lib/api-keys";
 import { ProviderInfo } from "@/lib/types";
 import { Check, CircleX, KeyRound, Loader2, Pencil, X } from "lucide-react";
 import React, { useCallback, useEffect, useState } from "react";
@@ -12,14 +12,6 @@ interface APIKeyManagerProps {
   userId?: string | null;
 }
 
-interface ApiKey {
-  id: string;
-  name: string;
-  provider: string;
-  key: string;
-  createdAt: string;
-}
-
 export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
   provider,
   onApiKeyChange,
@@ -27,66 +19,46 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [tempKey, setTempKey] = useState("");
-  const [currentApiKey, setCurrentApiKey] = useState<ApiKey | null>(null);
+  const [currentApiKey, setCurrentApiKey] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Load API keys when component mounts - try cache first, then database
-  const loadApiKeys = useCallback(async () => {
+  // Load API keys from localStorage when component mounts
+  const loadApiKeys = useCallback(() => {
     try {
       setIsLoading(true);
+      const cachedKey = getApiKeyFromStorage(provider.name, userId);
 
-      const cachedKey = userId ? ApiKeyCache.get(provider.name, userId) : null;
       if (cachedKey) {
-        const mockApiKey: ApiKey = {
-          id: 'cached-' + userId,
-          name: `${provider.name} API Key`,
-          provider: provider.name,
-          key: cachedKey,
-          createdAt: new Date().toISOString()
-        };
-        setCurrentApiKey(mockApiKey);
+        setCurrentApiKey(cachedKey);
         setTempKey(cachedKey);
-        onApiKeyChange?.(true);
-        setIsLoading(false);
-        return;
-      }
-      const response = await fetch('/api/api-keys');
-      if (response.ok) {
-        const data = await response.json();
-        const apiKey = data.apiKeys.find((key: ApiKey) => key.provider === provider.name);
-        if (apiKey) {
-          setCurrentApiKey(apiKey);
-          setTempKey(apiKey.key);
-          if (userId) {
-            ApiKeyCache.set(provider.name, apiKey.key, userId);
-          }
-          onApiKeyChange?.(true);
-        } else {
-          setCurrentApiKey(null);
-          setTempKey("");
-          onApiKeyChange?.(false);
-        }
       } else {
         setCurrentApiKey(null);
         setTempKey("");
-        onApiKeyChange?.(false);
       }
     } catch (error) {
       console.error("Failed to load API keys:", error);
       setCurrentApiKey(null);
       setTempKey("");
-      onApiKeyChange?.(false);
     } finally {
       setIsLoading(false);
     }
-  }, [provider.name, onApiKeyChange, userId]);
+  }, [provider.name, userId]); // Removed onApiKeyChange from dependencies
 
   useEffect(() => {
     loadApiKeys();
   }, [loadApiKeys]);
+
+  // Call onApiKeyChange when currentApiKey changes
+  useEffect(() => {
+    if (currentApiKey) {
+      onApiKeyChange?.(true);
+    } else if (currentApiKey === null && !isLoading) {
+      onApiKeyChange?.(false);
+    }
+  }, [currentApiKey, isLoading, onApiKeyChange]);
 
   const verifyApiKey = async (apiKey: string): Promise<boolean> => {
     try {
@@ -129,37 +101,15 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
     try {
       setIsLoading(true);
 
-      const response = await fetch('/api/api-keys', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: `${provider.name} API Key`,
-          provider: provider.name,
-          key: tempKey,
-        }),
-      });
+      // Save to localStorage
+      setApiKeyInStorage(provider.name, tempKey, userId);
+      setCurrentApiKey(tempKey);
 
-      if (response.ok) {
-        const data = await response.json();
-        setCurrentApiKey(data.apiKey);
+      setIsEditing(false);
+      setSuccess("API key saved successfully!");
 
-        // Update cache
-        if (userId) {
-          ApiKeyCache.set(provider.name, data.apiKey.key, userId);
-        }
-
-        setIsEditing(false);
-        setSuccess("API key saved successfully!");
-        onApiKeyChange?.(true);
-
-        // Clear success message after 3 seconds
-        setTimeout(() => setSuccess(null), 3000);
-      } else {
-        const errorData = await response.json();
-        setError(errorData.error || "Failed to save API key");
-      }
+      // Clear success message after 3 seconds
+      setTimeout(() => setSuccess(null), 3000);
     } catch (error) {
       console.error("Failed to save API key:", error);
       setError("Failed to save API key. Please try again.");
@@ -169,13 +119,13 @@ export const APIKeyManager: React.FC<APIKeyManagerProps> = ({
   };
 
   const handleCancel = () => {
-    setTempKey(currentApiKey?.key || "");
+    setTempKey(currentApiKey || "");
     setIsEditing(false);
     setError(null);
     setSuccess(null);
   };
 
-  const hasValidKey = Boolean(currentApiKey?.key);
+  const hasValidKey = Boolean(currentApiKey);
 
   if (isLoading && !isEditing) {
     return (

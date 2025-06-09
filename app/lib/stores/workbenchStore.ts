@@ -84,11 +84,12 @@ interface WorkbenchState {
     activePreviewPort: number | null;
     showTerminal: boolean;
     artifacts: Record<string, ArtifactState>;
-    isProcessingArtifact: boolean; // True if AI is generating content that will modify workbench
-    isLoadingFiles: boolean; // True when initially loading files from GitHub/template
+    isProcessingArtifact: boolean;
+    isLoadingFiles: boolean;
     fileLoadError: string | null;
     fileHistory: Record<string, { originalContent: string; versions: Array<{ timestamp: number; content: string }> }>;
-    pendingAIChange: { filePath: string; newContent: string } | null; // New state
+    pendingAIChange: { filePath: string; newContent: string } | null;
+    streamingContent: { filePath: string; content: string } | null;
 }
 
 const initialWorkbenchState: WorkbenchState = {
@@ -108,6 +109,7 @@ const initialWorkbenchState: WorkbenchState = {
     fileLoadError: null,
     fileHistory: {},
     pendingAIChange: null,
+    streamingContent: null,
 };
 
 export const $workbench = map<WorkbenchState>(initialWorkbenchState);
@@ -126,10 +128,25 @@ export const toggleWorkbench = (show?: boolean) => {
 };
 
 export const setWorkbenchView = (view: WorkbenchViewType) => {
+    const currentView = $workbench.get().currentView;
     $workbench.setKey('currentView', view);
+
+    if (view === 'Preview' && currentView !== 'Preview') {
+        setTimeout(() => {
+            const currentPreviews = $workbench.get().previews;
+            const hasNoActiveServer = !currentPreviews.some(p => p.ready);
+
+            if (hasNoActiveServer && typeof window !== 'undefined') {
+                const event = new CustomEvent('requestDevServer', {
+                    detail: { reason: 'preview_tab_switch' }
+                });
+                window.dispatchEvent(event);
+            }
+        }, 100);
+    }
 };
 
-const getFileLanguage = (filename: string | null): string => {
+export const getFileLanguage = (filename: string | null): string => {
     if (!filename) return 'plaintext';
     const extension = filename.split('.').pop()?.toLowerCase();
     const langMap: Record<string, string> = {
@@ -141,10 +158,22 @@ const getFileLanguage = (filename: string | null): string => {
     return langMap[extension || ''] || 'plaintext';
 };
 
+const normalizeFilePath = (filePath: string): string => {
+    let normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
+
+    if (normalizedPath.startsWith('home/project/')) {
+        return '/' + normalizedPath;
+    } else if (normalizedPath.startsWith('project/')) {
+        return '/home/' + normalizedPath;
+    } else {
+        if (!filePath.startsWith('/')) filePath = '/' + filePath;
+        return WORK_DIR + filePath;
+    }
+};
+
 export const setSelectedFile = (filePath: string | null) => {
     const currentSelected = $workbench.get().selectedFile;
-    if (currentSelected === filePath && filePath !== null) { // Allow re-selection if filePath is null (deselect)
-        // If trying to select the same file, but its content might have updated in the main 'files' store
+    if (currentSelected === filePath && filePath !== null) {
         if (filePath) {
             const fileData = $workbench.get().files[filePath];
             const currentDoc = $workbench.get().currentDocument;
@@ -165,19 +194,18 @@ export const setSelectedFile = (filePath: string | null) => {
     if (filePath) {
         const fileData = $workbench.get().files[filePath];
         if (fileData && fileData.type === 'file') {
+            const content = (fileData as WorkbenchFile).content;
             $workbench.setKey('currentDocument', {
                 filePath: filePath,
-                value: (fileData as WorkbenchFile).content,
+                value: content,
                 isBinary: (fileData as WorkbenchFile).isBinary,
                 language: getFileLanguage(filePath),
-                scroll: { top: 0, left: 0, line: 0, column: 0 } // Reset scroll for new file
+                scroll: { top: 0, left: 0, line: 0, column: 0 }
             });
         } else if (fileData && fileData.type === 'directory') {
-            // If a directory is selected, clear the current document
             $workbench.setKey('currentDocument', null);
         } else {
             $workbench.setKey('currentDocument', null);
-            console.warn(`File or directory not found in store: ${filePath}`);
         }
     } else {
         $workbench.setKey('currentDocument', null);
@@ -188,7 +216,6 @@ export const setWorkbenchFiles = (newFiles: WorkbenchFileMap, source: string = "
     const currentStore = $workbench.get();
     let filesChanged = false;
 
-    // Deep check if files actually changed
     if (Object.keys(currentStore.files).length !== Object.keys(newFiles).length) {
         filesChanged = true;
     } else {
@@ -208,22 +235,17 @@ export const setWorkbenchFiles = (newFiles: WorkbenchFileMap, source: string = "
 
     $workbench.setKey('files', newFiles);
 
-
-    // Logic to auto-select a file if none is selected (or if current is deleted)
     const currentSelected = currentStore.selectedFile;
     if ((!currentSelected && Object.keys(newFiles).length > 0) || (currentSelected && !newFiles[currentSelected])) {
         const firstFilePath = Object.keys(newFiles).find(
             (path) => newFiles[path]?.type === 'file'
         );
         if (firstFilePath) {
-            // Deferring setSelectedFile to allow current transaction to complete
             setTimeout(() => setSelectedFile(firstFilePath), 0);
         } else if (currentSelected && !newFiles[currentSelected]) {
-            // If current selected file was deleted and no other file is available
             setTimeout(() => setSelectedFile(null), 0);
         }
     } else if (currentSelected && newFiles[currentSelected] && newFiles[currentSelected]?.type === 'file') {
-        // If current file still exists, ensure its document is up-to-date
         const fileData = newFiles[currentSelected] as WorkbenchFile;
         const currentDoc = currentStore.currentDocument;
         if (!currentDoc || currentDoc.filePath !== currentSelected || currentDoc.value !== fileData.content || currentDoc.isBinary !== fileData.isBinary) {
@@ -244,28 +266,21 @@ export const handleEditorContentChange = (newContent: string) => {
     const currentStore = $workbench.get();
     const doc = currentStore.currentDocument;
     if (doc) {
-        // Always update the document with new content
         $workbench.setKey('currentDocument', { ...doc, value: newContent });
 
-        // Check if this content is different from the saved version
         const currentFiles = currentStore.files;
         const originalFile = currentFiles[doc.filePath] as WorkbenchFile | undefined;
 
         if (originalFile) {
-            // If there's an original file, check if content has changed
             const unsaved = new Set(currentStore.unsavedFiles);
 
             if (originalFile.content !== newContent) {
-                // Mark as unsaved if content differs
                 unsaved.add(doc.filePath);
             } else {
-                // Remove from unsaved if content matches
                 unsaved.delete(doc.filePath);
             }
 
             $workbench.setKey('unsavedFiles', unsaved);
-        } else {
-            console.warn(`No original file found for ${doc.filePath}`);
         }
     }
 };
@@ -289,7 +304,7 @@ export const saveCurrentFile = async (wc: WebContainer | null) => {
                 for (let i = 0; i < dirParts.length - 1; i++) {
                     currentDirPath = currentDirPath ? `${currentDirPath}/${dirParts[i]}` : dirParts[i];
                     try {
-                        await wc.fs.readdir(currentDirPath); // Check if dir exists
+                        await wc.fs.readdir(currentDirPath);
                     } catch (e: any) {
                         if (e.message.includes('ENOENT')) {
                             await wc.fs.mkdir(currentDirPath, { recursive: true });
@@ -338,7 +353,6 @@ export const resetCurrentFile = () => {
         const fileHistory = currentStore.fileHistory[doc.filePath];
 
         if (fileHistory && fileHistory.originalContent) {
-            // Reset to the original content from history
             const unsaved = new Set(currentStore.unsavedFiles);
             unsaved.delete(doc.filePath);
 
@@ -371,6 +385,7 @@ export const setCurrentDocumentScroll = (scroll: ScrollPosition) => {
         $workbench.setKey('currentDocument', { ...doc, scroll });
     }
 };
+
 export const addPreview = (port: number, url: string) => {
     const currentStore = $workbench.get();
     const existingPreviewIndex = currentStore.previews.findIndex(p => p.port === port);
@@ -384,9 +399,7 @@ export const addPreview = (port: number, url: string) => {
     }
     $workbench.setKey('previews', updatedPreviews);
 
-    // If it's the first preview or matches common dev server ports, set as active
     if (updatedPreviews.length === 1 || !currentStore.activePreviewUrl || [3000, 5173, 8080].includes(port)) {
-        // Call the renamed action here
         setActivePreview(port, url);
     }
 };
@@ -398,32 +411,24 @@ export const removePreview = (port: number) => {
 
     if (currentStore.activePreviewPort === port) {
         if (updatedPreviews.length > 0) {
-            // Call the renamed action here
             setActivePreview(updatedPreviews[0].port, updatedPreviews[0].baseUrl);
         } else {
-            // Call the renamed action here to clear
             setActivePreview(null, null);
         }
     }
 };
 
-// Renamed from setActivePreviewUrl for clarity and to handle both port and URL
 export const setActivePreview = (port: number | null, url: string | null) => {
     $workbench.setKey('activePreviewUrl', url);
     $workbench.setKey('activePreviewPort', port);
-    // Optionally, auto-switch to Preview tab if a valid preview is set
-    // if (url && port && $workbench.get().currentView !== 'Preview') {
-    //     setWorkbenchView('Preview');
-    // }
 };
-
 
 export const toggleTerminal = (show?: boolean) => {
     const currentShowState = $workbench.get().showTerminal;
     $workbench.setKey('showTerminal', show === undefined ? !currentShowState : show);
 };
 
-export const addArtifact = (artifactData: Omit<ArtifactState, 'actions' | 'closed'>) => { // Added closed to Omit
+export const addArtifact = (artifactData: Omit<ArtifactState, 'actions' | 'closed'>) => {
     const currentArtifacts = $workbench.get().artifacts;
     if (!currentArtifacts[artifactData.messageId]) {
         $workbench.setKey('artifacts', {
@@ -431,7 +436,7 @@ export const addArtifact = (artifactData: Omit<ArtifactState, 'actions' | 'close
             [artifactData.messageId]: {
                 ...artifactData,
                 actions: {},
-                closed: false, // Ensure closed is initialized
+                closed: false,
             },
         });
     }
@@ -486,30 +491,11 @@ export const setProcessingArtifact = (isProcessing: boolean) => {
 
 // --- File Update / Creation from AI Actions ---
 export const updateFileInWorkbench = async (filePath: string, content: string, wc?: WebContainer | null) => {
-
-    // Normalize the file path to prevent duplication of WORK_DIR
-    let normalizedFilePath = filePath;
-
-    // Remove leading slash if present for normalization
-    let pathForNormalization = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-
-    // Check if the path already contains the work directory structure
-    if (pathForNormalization.startsWith('home/project/')) {
-        // Path already has full work dir, just add leading slash
-        normalizedFilePath = '/' + pathForNormalization;
-    } else if (pathForNormalization.startsWith('project/')) {
-        // Path has partial work dir, prepend /home/
-        normalizedFilePath = '/home/' + pathForNormalization;
-    } else {
-        // Path is relative, prepend full WORK_DIR
-        normalizedFilePath = path.join(WORK_DIR, pathForNormalization);
-    }
-
+    const normalizedFilePath = normalizeFilePath(filePath);
 
     const currentStore = $workbench.get();
     const currentFiles = currentStore.files;
 
-    // Create the file entry for the store regardless of whether it exists already
     const fileEntry = currentFiles[normalizedFilePath];
     const updatedFileEntry: WorkbenchFile = {
         path: normalizedFilePath,
@@ -521,11 +507,9 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
         lockedByFolder: (fileEntry as WorkbenchFile)?.lockedByFolder,
     };
 
-    // First update the store so UI shows the file immediately
     const newFilesMap = { ...currentFiles, [normalizedFilePath]: updatedFileEntry };
     $workbench.setKey('files', newFilesMap);
 
-    // If this file is currently selected, update the current document
     if (currentStore.selectedFile === normalizedFilePath) {
         $workbench.setKey('currentDocument', {
             filePath: normalizedFilePath,
@@ -536,10 +520,8 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
         });
     }
 
-    // Now write to WebContainer if available
     if (wc) {
         try {
-            // Get relative path for WebContainer
             let relativePath = normalizedFilePath;
             if (normalizedFilePath.startsWith(WORK_DIR + '/')) {
                 relativePath = normalizedFilePath.substring(WORK_DIR.length + 1);
@@ -547,47 +529,35 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
                 relativePath = normalizedFilePath.substring(1);
             }
 
-            // Ensure parent directories exist before writing file
             const dirPath = path.dirname(relativePath);
             if (dirPath && dirPath !== '.') {
                 try {
-                    // Check if directory exists first
-                    try {
-                        await wc.fs.readdir(dirPath);
-                    } catch (err) {
-                        // Directory doesn't exist, create it
-                        await wc.fs.mkdir(dirPath, { recursive: true });
-                    }
-                } catch (dirError) {
-                    console.warn(`Error ensuring parent directory exists: ${dirError}`);
-                    // Continue and try to write file anyway
+                    await wc.fs.readdir(dirPath);
+                } catch (err) {
+                    await wc.fs.mkdir(dirPath, { recursive: true });
                 }
             }
 
             await wc.fs.writeFile(relativePath, content);
 
-            // Verify the file was written correctly
             try {
                 const writtenContent = await wc.fs.readFile(relativePath, 'utf-8');
-                if (writtenContent === content) {
-                } else {
-                    console.warn(`⚠️ WORKBENCH_STORE: File content mismatch for ${relativePath}. Expected ${content.length} chars, got ${writtenContent.length} chars`);
+                if (writtenContent !== content) {
+                    console.warn(`File content mismatch for ${relativePath}. Expected ${content.length} chars, got ${writtenContent.length} chars`);
                 }
             } catch (verifyError) {
-                console.warn(`⚠️ WORKBENCH_STORE: Could not verify file write for ${relativePath}:`, verifyError);
+                console.warn(`Could not verify file write for ${relativePath}:`, verifyError);
             }
 
             toast({ title: "File Created", description: `${path.basename(normalizedFilePath)} saved to virtual environment.` });
         } catch (error) {
-            console.error(`WORKBENCH_STORE: Error writing file ${normalizedFilePath} to WebContainer:`, error);
+            console.error(`Error writing file ${normalizedFilePath} to WebContainer:`, error);
             toast({ title: "Sync Error", description: `Failed to save ${path.basename(normalizedFilePath)} to virtual environment. ${error}`, variant: "destructive" });
         }
-    } else {
     }
 
-    // Update file history
     const history = currentStore.fileHistory;
-    const originalContent = (currentFiles[normalizedFilePath] as WorkbenchFile)?.content || ""; // Get original before update
+    const originalContent = (currentFiles[normalizedFilePath] as WorkbenchFile)?.content || "";
     const currentFileHistory = history[normalizedFilePath] || { originalContent, versions: [] };
     $workbench.setKey('fileHistory', {
         ...history,
@@ -596,28 +566,10 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
             versions: [...currentFileHistory.versions, { timestamp: Date.now(), content }]
         }
     });
-
 };
 
 export const addDirectoryToWorkbench = async (dirPath: string, wc?: WebContainer | null) => {
-
-    // Normalize the directory path to prevent duplication of WORK_DIR
-    let normalizedDirPath = dirPath;
-
-    // Remove leading slash if present for normalization
-    let pathForNormalization = dirPath.startsWith('/') ? dirPath.substring(1) : dirPath;
-
-    // Check if the path already contains the work directory structure
-    if (pathForNormalization.startsWith('home/project/')) {
-        // Path already has full work dir, just add leading slash
-        normalizedDirPath = '/' + pathForNormalization;
-    } else if (pathForNormalization.startsWith('project/')) {
-        // Path has partial work dir, prepend /home/
-        normalizedDirPath = '/home/' + pathForNormalization;
-    } else {
-        // Path is relative, prepend full WORK_DIR
-        normalizedDirPath = path.join(WORK_DIR, pathForNormalization);
-    }
+    const normalizedDirPath = normalizeFilePath(dirPath);
 
     const currentStore = $workbench.get();
     const currentFiles = currentStore.files;
@@ -627,7 +579,7 @@ export const addDirectoryToWorkbench = async (dirPath: string, wc?: WebContainer
             path: normalizedDirPath,
             name: path.basename(normalizedDirPath),
             type: 'directory',
-            isLocked: false, // Default for new directories
+            isLocked: false,
         };
         $workbench.setKey('files', { ...currentFiles, [normalizedDirPath]: newDirEntry });
 
@@ -641,104 +593,78 @@ export const addDirectoryToWorkbench = async (dirPath: string, wc?: WebContainer
                 }
                 await wc.fs.mkdir(relativePath, { recursive: true });
             } catch (error) {
-                console.error(`AI Action: Error creating directory ${normalizedDirPath} in WebContainer:`, error);
+                console.error(`Error creating directory ${normalizedDirPath} in WebContainer:`, error);
             }
         }
-    } else {
     }
 };
 
-// New actions for AI change review
 export const setPendingAIChange = (filePath: string, newContent: string) => {
     const currentStore = $workbench.get();
-    // If the file path is not absolute (doesn't start with WORK_DIR), prepend it.
     const normalizedFilePath = filePath.startsWith(WORK_DIR) ? filePath : path.join(WORK_DIR, filePath.replace(/^\//, ''));
 
     $workbench.setKey('pendingAIChange', { filePath: normalizedFilePath, newContent });
-    setWorkbenchView('Diff'); // Automatically switch to diff view
-    // Ensure the workbench is visible
+    setWorkbenchView('Diff');
     if (!currentStore.showWorkbench) {
         toggleWorkbench(true);
     }
     toast({ title: "AI Suggestion Ready", description: `Review changes for ${path.basename(normalizedFilePath)} in the Diff panel.` });
 };
 
-export const clearPendingAIChange = () => {
-    const currentView = $workbench.get().currentView;
-    $workbench.setKey('pendingAIChange', null);
-    // If current view is Diff, switch back to Editor, otherwise stay.
-    if (currentView === 'Diff') {
-        setWorkbenchView('Editor');
-    }
-};
-
 export const acceptPendingAIChange = async (wc?: WebContainer | null) => {
     const pendingChange = $workbench.get().pendingAIChange;
     if (pendingChange) {
-        // Ensure filePath is normalized before updating
         const normalizedPath = pendingChange.filePath.startsWith(WORK_DIR)
             ? pendingChange.filePath
             : path.join(WORK_DIR, pendingChange.filePath.replace(/^\//, ''));
 
         await updateFileInWorkbench(normalizedPath, pendingChange.newContent, wc);
-        clearPendingAIChange(); // This will also switch view if it was 'Diff'
-        setSelectedFile(normalizedPath); // Ensure the updated file is selected
-        // Explicitly switch to editor after accepting changes
+        setSelectedFile(normalizedPath);
         setWorkbenchView('Editor');
         toast({ title: "AI Changes Applied", description: `Changes to ${path.basename(normalizedPath)} have been applied.` });
     }
 };
 
+export const setStreamingContent = (filePath: string | null, content: string = '') => {
+    $workbench.setKey('streamingContent', filePath ? { filePath, content } : null);
 
-// Helper to initialize selectedFile from URL query param on client-side
-if (typeof window !== 'undefined') {
-    const params = new URLSearchParams(window.location.search);
-    const fileToOpen = params.get('file');
-    if (fileToOpen) {
-        const checkAndSet = () => {
-            const currentFiles = $workbench.get().files;
-            const currentSelected = $workbench.get().selectedFile;
-            const fullPathToOpen = fileToOpen.startsWith(WORK_DIR) ? fileToOpen : `${WORK_DIR}/${fileToOpen.replace(/^\//, '')}`;
-
-            if (currentFiles[fullPathToOpen] && currentSelected !== fullPathToOpen) {
-                setSelectedFile(fullPathToOpen);
-            } else if (!currentFiles[fullPathToOpen] && Object.keys(currentFiles).length > 0) {
-                // If file doesn't exist yet, but store has files, retry after a short delay
-                // This handles timing issues where files might be loading
-                console.warn(`File ${fullPathToOpen} not found in store, retrying...`);
-                setTimeout(checkAndSet, 500);
-            }
-        };
-        // Initial delay to allow files to potentially load from GitHub/template
-        setTimeout(checkAndSet, 500);
+    if (filePath && $workbench.get().selectedFile !== filePath) {
+        setSelectedFile(filePath);
+        setWorkbenchView('Editor');
     }
-}
+};
 
-// Add global debug function for testing package.json refresh
+export const updateStreamingContent = (filePath: string, content: string) => {
+    const current = $workbench.get().streamingContent;
+    if (current && current.filePath === filePath) {
+        $workbench.setKey('streamingContent', { filePath, content });
+    } else {
+        setStreamingContent(filePath, content);
+    }
+};
+
+export const clearStreamingContent = () => {
+    $workbench.setKey('streamingContent', null);
+};
+
 if (typeof window !== 'undefined') {
     (window as any).debugRefreshPackageJson = async () => {
         try {
-
-            // Try to get WebContainer instance from the global manager
             const { webContainerManager } = await import('@/lib/WebContainerManager');
             const webContainerInstance = await webContainerManager.getWebContainer();
 
             if (!webContainerInstance) {
-                console.error('❌ WebContainer not available');
+                console.error('WebContainer not available');
                 return false;
             }
 
-            // Read package.json from WebContainer
             const packageJsonContent = await webContainerInstance.fs.readFile('package.json', 'utf-8');
-
-            // Update workbench
             await updateFileInWorkbench('/home/project/package.json', packageJsonContent, webContainerInstance);
 
             return true;
         } catch (error) {
-            console.error('❌ Failed to refresh package.json:', error);
+            console.error('Failed to refresh package.json:', error);
             return false;
         }
     };
-
 }

@@ -7,7 +7,6 @@ import {
 } from "@/components/ui/sidebar";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
 
 interface AuthenticatedLayoutProps {
   children: React.ReactNode;
@@ -16,14 +15,6 @@ interface AuthenticatedLayoutProps {
 export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
   const { data: session, status } = useSession();
   const router = useRouter();
-
-  useEffect(() => {
-    if (status === "loading") return;
-
-    if (!session) {
-      router.push("/login");
-    }
-  }, [session, status, router]);
 
   if (status === "loading") {
     return (
@@ -37,7 +28,7 @@ export function AuthenticatedLayout({ children }: AuthenticatedLayoutProps) {
   }
 
   if (!session) {
-    return null;
+    return <>{children}</>;
   }
 
   return (
