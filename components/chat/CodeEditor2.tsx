@@ -58,7 +58,7 @@ export default function CodeEditor2({ value, onChange, language, readOnly = fals
         // Reduce TypeScript diagnostics for better performance
         const diagnosticCodesToIgnore = [
             1109, 1108, 1005, 1002, 1003, 1009, 2792, 2304, 2307, 2339, 2365, 2635,
-            7016, 7027, 7053, 2571, 2322, 2345, 2531, 2532, 18048, 8013, 2488, 2584, 5097, 8010, 8006
+            7016, 7027, 7053, 2571, 2322, 2345, 2531, 2532, 18048, 8013, 2488, 2584, 5097, 8010, 8006, 8008
         ];
 
         monacoInstance.languages.typescript.typescriptDefaults.setDiagnosticsOptions({
@@ -190,20 +190,31 @@ declare global {
             if (currentValue !== value) {
                 try {
                     if (readOnly && value.length > currentValue.length) {
-                        // For streaming content, append new content
+                        // For streaming content, append new content more efficiently
                         const newContent = value.slice(currentValue.length);
                         if (newContent) {
-                            const position = editorRef.current.getModel()?.getPositionAt(currentValue.length);
-                            if (position) {
-                                editorRef.current.getModel()?.pushEditOperations([], [{
-                                    range: new monacoRef.current!.Range(position.lineNumber, position.column, position.lineNumber, position.column),
+                            const model = editorRef.current.getModel();
+                            if (model) {
+                                const position = model.getPositionAt(currentValue.length);
+                                // Use pushEditOperations for better performance during streaming
+                                model.pushEditOperations([], [{
+                                    range: new monacoRef.current!.Range(
+                                        position.lineNumber, 
+                                        position.column, 
+                                        position.lineNumber, 
+                                        position.column
+                                    ),
                                     text: newContent
                                 }], () => null);
+                                
+                                // Auto-scroll to bottom during streaming
+                                editorRef.current.revealLine(model.getLineCount());
                             } else {
                                 editorRef.current.setValue(value);
                             }
                         }
                     } else {
+                        // For normal content updates, use setValue
                         editorRef.current.setValue(value);
                     }
                 } catch (error) {

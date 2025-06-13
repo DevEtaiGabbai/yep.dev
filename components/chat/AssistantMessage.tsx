@@ -4,7 +4,7 @@ import { setSelectedFile as setSelectedWorkbenchFile, setWorkbenchView } from '@
 import { Markdown } from '@/components/Markdown';
 import { ProgressIndicator } from '@/lib/types/index';
 import { motion } from 'framer-motion';
-import { BookDashed, Brain, FileText, Loader2, MessageSquare, WrapText } from 'lucide-react';
+import { Brain, FileText, Loader2, MessageSquare, WrapText } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 
 const getTextContent = (content: string | Array<{ type: 'text' | 'image_url'; text?: string; image_url?: { url: string } }>): string => {
@@ -161,13 +161,13 @@ const AiStreamState = ({ isStreaming, progress }: { isStreaming: boolean; progre
       displayText = 'Creating summary';
       break;
     case 'context':
-      icon = <BookDashed className="w-4 h-4 text-[#969798]" />;
-      displayText = 'Selecting context';
-      break;
+    // icon = <BookDashed className="w-4 h-4 text-[#969798]" />;
+    // displayText = 'Selecting context';
+    // break;
     case 'response':
     default:
       icon = <Brain className="w-4 h-4 text-[#969798]" />;
-      displayText = 'Reasoning';
+      displayText = 'Thinking...';
   }
 
   // Calculate text length-based dynamic spread (similar to text-shimmer component)

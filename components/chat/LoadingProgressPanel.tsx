@@ -7,11 +7,13 @@ import { Check, MessageSquare, Terminal } from 'lucide-react';
 interface LoadingProgressPanelProps {
   isInstallingDeps: boolean;
   isStartingDevServer: boolean;
+  isLoadingExistingProject?: boolean;
 }
 
 export const LoadingProgressPanel = ({
   isInstallingDeps,
-  isStartingDevServer
+  isStartingDevServer,
+  isLoadingExistingProject = false
 }: LoadingProgressPanelProps) => {
   return (
     <motion.div
@@ -26,12 +28,15 @@ export const LoadingProgressPanel = ({
         </div>
         <div className="flex-1">
           <div className="text-sm text-[#f3f6f6] mb-4">
-            I&apos;m importing your project into the WebContainer. This may take a moment as I set everything up.
+            {isLoadingExistingProject 
+              ? "I'm loading your existing project. This may take a moment as I retrieve your files."
+              : "I'm importing your project into the WebContainer. This may take a moment as I set everything up."
+            }
           </div>
 
           <div className="border border-[#313133] overflow-hidden rounded-lg w-full shadow-md">
             <div className="p-4 bg-[#161618] text-[#f3f6f6] font-medium border-b border-[#313133]">
-              Importing Project
+              {isLoadingExistingProject ? "Loading Project" : "Importing Project"}
             </div>
             <div className="p-4 bg-[#161618]">
               <ul className="list-none space-y-4">
@@ -45,7 +50,7 @@ export const LoadingProgressPanel = ({
 
                     <div className={cn("text-[#f3f6f6]"
                     )}>
-                      Loading project files
+                      {isLoadingExistingProject ? "Loading existing project files" : "Loading project files"}
                     </div>
                   </div>
 

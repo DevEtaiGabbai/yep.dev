@@ -27,7 +27,7 @@ import { DEFAULT_TEMPLATE, STARTER_TEMPLATES } from "@/lib/constants";
 import { Message } from "@/lib/services/conversationService";
 import { getTerminalStore } from "@/stores/terminal";
 import { useSession } from "next-auth/react";
-import { useParams, useRouter, useSearchParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 // Module-level guard to track project creation attempts
@@ -38,7 +38,7 @@ function Workspace() {
   const router = useRouter();
 
   const params = useParams();
-  const searchParams = useSearchParams();
+  // const searchParams = useSearchParams();
   const conversationId = typeof params.id === "string" ? params.id : "";
 
   // Initialize with defaults - will be updated when conversation loads
@@ -47,18 +47,16 @@ function Workspace() {
   const [sendFirst, setSendFirst] = useState(false);
 
   // Support legacy URL parameters for backward compatibility
-  const templateNameFromUrl = searchParams.get("template");
-  const initialPromptFromUrl = searchParams.get("prompt");
-  const sendFirstFromUrl = searchParams.get("sendFirst") === "true";
-  const modelFromUrl = searchParams.get("model");
+  // const templateNameFromUrl = searchParams.get("template");
+  // const initialPromptFromUrl = searchParams.get("prompt");
+  // const sendFirstFromUrl = searchParams.get("sendFirst") === "true";
+  // const modelFromUrl = searchParams.get("model");
 
   const template =
     STARTER_TEMPLATES.find((t) => t.name === templateName) ||
     DEFAULT_TEMPLATE;
 
-  const [conversationMessages, setConversationMessages] = useState<Message[]>(
-    []
-  );
+  const [conversationMessages, setConversationMessages] = useState<Message[]>([]);
   const [conversationLoaded, setConversationLoaded] = useState(false);
   const [installSequenceTriggered, setInstallSequenceTriggered] =
     useState(false);
@@ -68,15 +66,12 @@ function Workspace() {
     useState(false);
   const [initialStreamCompleted, setInitialStreamCompleted] = useState(false);
   const [showErrorNotification, setShowErrorNotification] = useState(false);
-  const [errorNotificationDetails, setErrorNotificationDetails] = useState<
-    string | null
-  >(null);
-  const [selectedModel, setSelectedModel] = useState<string | undefined>(
-    modelFromUrl
-  );
+  const [errorNotificationDetails, setErrorNotificationDetails] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string | undefined>();
   const [projectId, setProjectId] = useState<string | null>(null);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [showUpgradeDialog, setShowUpgradeDialog] = useState(false);
+  const [shouldLoadTemplate, setShouldLoadTemplate] = useState(false);
 
   const initialPromptSentRef = useRef(false);
   const projectInitializationDoneRef = useRef(false);
@@ -105,7 +100,10 @@ function Workspace() {
     files: templateFiles,
     selectedFile: selectedTemplateFile,
     templateError,
-  } = useCloudFrontTemplate(webContainerInstance, template.cloudFrontUrl);
+  } = useCloudFrontTemplate(
+    webContainerInstance,
+    shouldLoadTemplate ? template.cloudFrontUrl : undefined
+  );
 
   // AI Chat (existing logic)
   const {
@@ -155,11 +153,15 @@ function Workspace() {
       try {
         const response = await fetch(`/api/conversations/${conversationId}`);
         if (!response.ok) {
-          if (response.status === 404) console.error("Conversation not found");
-          setErrorNotificationDetails(
-            `Failed to load conversation: ${response.statusText}`
-          );
-          setShowErrorNotification(true);
+          if (response.status === 404) {
+            setShouldLoadTemplate(true);
+          } else {
+            setErrorNotificationDetails(
+              `Failed to load conversation: ${response.statusText}`
+            );
+            setShowErrorNotification(true);
+          }
+          setConversationLoaded(true);
           return;
         }
         const data = await response.json();
@@ -179,8 +181,8 @@ function Workspace() {
           const conversation = data.conversation;
 
           // Use conversation metadata, fallback to URL params for backward compatibility
-          setTemplateName(conversation.templateName || templateNameFromUrl || DEFAULT_TEMPLATE.name);
-          setSendFirst(conversation.sendFirst ?? sendFirstFromUrl);
+          setTemplateName(conversation.templateName || DEFAULT_TEMPLATE.name);
+          setSendFirst(conversation.sendFirst);
 
           // Extract initial prompt from first user message if available
           if (conversation.messages.length > 0) {
@@ -195,19 +197,24 @@ function Workspace() {
             }
           }
 
-          // Fallback to URL param if no prompt found in messages
-          if (!initialPrompt && initialPromptFromUrl) {
-            setInitialPrompt(initialPromptFromUrl);
+          // Check if this is a new conversation with no messages
+          if (conversation.messages.length === 0) {
+            setShouldLoadTemplate(true);
           }
+
+        } else {
+          setShouldLoadTemplate(true);
         }
         setConversationLoaded(true);
       } catch (error) {
         console.error("Error loading conversation:", error);
+        setShouldLoadTemplate(true);
         setErrorNotificationDetails(
           `Error loading conversation: ${error instanceof Error ? error.message : String(error)
           }`
         );
         setShowErrorNotification(true);
+        setConversationLoaded(true);
       }
     }
     if (status === "authenticated") loadConversation();
@@ -216,11 +223,19 @@ function Workspace() {
   // If sendFirst is false, it means we are loading an existing conversation
   // or have already processed the initial prompt. In this context,
   // the "initial prompt submission" step is considered complete for this page load.
+  // For existing conversations with messages, we should also set promptSubmitted to true.
   useEffect(() => {
-    if (!sendFirst && conversationLoaded) {
-      setPromptSubmitted(true);
+    if (conversationLoaded) {
+      // Set promptSubmitted to true if:
+      // 1. sendFirst is false (explicitly indicates not to send first message), OR
+      // 2. We have existing messages in the conversation (indicating it's not a new conversation)
+      if (!sendFirst || conversationMessages.length > 0) {
+        setPromptSubmitted(true);
+      } else {
+        setPromptSubmitted(false);
+      }
     }
-  }, [sendFirst, conversationLoaded]);
+  }, [sendFirst, conversationLoaded, conversationMessages.length]);
 
   // Get or create project for this conversation
   useEffect(() => {
@@ -322,6 +337,7 @@ function Workspace() {
         const response = await fetch(`/api/projects/${projectId}`);
 
         if (!response.ok) {
+          setShouldLoadTemplate(true);
           projectFilesLoadedRef.current = true;
           return;
         }
@@ -329,6 +345,7 @@ function Workspace() {
         const projectData = await response.json();
         if (projectData.project?.files && projectData.project.files.length > 0) {
           let firstFileToSelect = null;
+          let filesLoadedCount = 0;
 
           for (const file of projectData.project.files) {
             try {
@@ -339,6 +356,7 @@ function Workspace() {
 
               if (file.content) {
                 await updateFileInWorkbench(fullPath, file.content, webContainerInstance);
+                filesLoadedCount++;
 
                 // Prefer app files for selection
                 if (
@@ -355,18 +373,24 @@ function Workspace() {
           }
 
           if (firstFileToSelect) {
-            setSelectedWorkbenchFile(firstFileToSelect);
-            setWorkbenchView("Editor");
+            setTimeout(() => {
+              setSelectedWorkbenchFile(firstFileToSelect);
+              setWorkbenchView("Editor");
+            }, 100); // Small delay to ensure store is updated
           }
 
-          console.log(`✅ Loaded ${projectData.project.files.length} files from database for project ${projectId}`);
+
+          // Files loaded from database, don't need CloudFront template
+          setShouldLoadTemplate(false);
         } else {
-          console.log("No project files found, will use template files");
+          console.log("No project files found in database, will load CloudFront template");
+          setShouldLoadTemplate(true);
         }
 
         projectFilesLoadedRef.current = true; // Mark as loaded
       } catch (error) {
         console.error("Error loading project files:", error);
+        setShouldLoadTemplate(true);
         projectFilesLoadedRef.current = true; // Mark as loaded even on error to prevent retries
       }
     };
@@ -416,7 +440,8 @@ function Workspace() {
   useEffect(() => {
     if (
       Object.keys(templateFiles).length > 0 &&
-      Object.keys(filesFromStore).length === 0
+      Object.keys(filesFromStore).length === 0 &&
+      shouldLoadTemplate
     ) {
       $workbench.setKey("files", templateFiles);
       if (selectedTemplateFile && !currentSelectedFileInStore) {
@@ -428,6 +453,7 @@ function Workspace() {
     selectedTemplateFile,
     filesFromStore,
     currentSelectedFileInStore,
+    shouldLoadTemplate,
   ]);
 
   const handleAIFileActions = useCallback(
@@ -814,36 +840,6 @@ function Workspace() {
     };
   }, [isSubmittingInitialPrompt]);
 
-  useEffect(() => {
-    if (streamingComplete && aiCompletedFiles && aiCompletedFiles.size > 0) {
-      const timer = setTimeout(() => {
-        const completedFilesArray = Array.from(aiCompletedFiles);
-        if (completedFilesArray.length > 0) {
-          const firstFile = completedFilesArray[0];
-          if (currentSelectedFileInStore !== firstFile) {
-            setSelectedWorkbenchFile(firstFile);
-          }
-
-          // Force refresh the preview after AI completes files
-          setTimeout(() => {
-            const previews = $workbench.get().previews;
-            if (previews.length > 0) {
-              const mainPreview =
-                previews.find((p) => [3000, 5173, 8080].includes(p.port)) ||
-                previews[0];
-              if (mainPreview) {
-                // Force reload by adding a timestamp
-                const refreshedUrl = mainPreview.baseUrl + "?t=" + Date.now();
-                setActivePreview(mainPreview.port, refreshedUrl);
-              }
-            }
-          }, 1000);
-        }
-      }, 500);
-      return () => clearTimeout(timer);
-    }
-  }, [streamingComplete, aiCompletedFiles, currentSelectedFileInStore]);
-
   // Listen for custom events to force preview refresh
   //consider
   useEffect(() => {
@@ -891,12 +887,6 @@ function Workspace() {
             terminalStoreManager.actions.setTerminalRunning("bolt", false);
           }
         }
-      } else {
-        console.log('[RequestDevServer] Server already running or conditions not met', {
-          hasActiveServer: !hasNoActiveServer,
-          hasWebContainer: !!webContainerInstance,
-          hasFiles: Object.keys(filesFromStore).length > 0
-        });
       }
     };
 
@@ -917,13 +907,6 @@ function Workspace() {
       !initialStreamCompleted &&
       messages.length > 1
     ) {
-      // Clean up URL by removing all query parameters for cleaner URLs
-      const url = new URL(window.location.href);
-      // const hasParams = url.search.length > 0;
-      // if (hasParams) {
-      //   url.search = ''; // Remove all query parameters
-      //   window.history.replaceState({}, "", url.toString());
-      // }
       setInitialStreamCompleted(true);
     }
   }, [
@@ -942,11 +925,14 @@ function Workspace() {
     return <LoadingOverlay error={null} />;
   }
 
-  if (
-    // isLoadingTemplate &&
+  const shouldShowLoadingOverlay = (
     Object.keys(filesFromStore).length === 0 &&
-    !showErrorNotification
-  ) {
+    !showErrorNotification &&
+    !conversationLoaded &&
+    !projectId
+  );
+
+  if (shouldShowLoadingOverlay) {
     return <LoadingOverlay error={null} />;
   }
 
@@ -963,6 +949,7 @@ function Workspace() {
               <p>openRouterError: {openRouterError ? 'YES' : 'NO'}</p>
               <p>showErrorNotification: {String(showErrorNotification)}</p>
               <p>messages.length: {messages.length}</p>
+              <p>sendFirst: {String(sendFirst)}</p>
             </div>
           )}
         </div>

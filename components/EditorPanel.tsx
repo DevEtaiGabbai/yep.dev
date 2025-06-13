@@ -22,21 +22,43 @@ import { SearchPanel } from './SearchPanel';
 
 export function EditorPanel() {
   const workbenchState = useStore($workbench);
-  const { files, selectedFile, currentDocument, unsavedFiles, streamingContent } = workbenchState;
+  const { files, selectedFile, currentDocument, streamingContent } = workbenchState;
 
   const handleFileSelectInTree = useCallback((filePath: string | undefined) => {
     setSelectedWorkbenchFile(filePath || null);
   }, []);
 
-
   const handleEditorChange = useCallback((newContent: string) => {
     handleEditorContentChange(newContent);
   }, []);
 
+  // Fix the flickering by creating stable content and language values
+  const editorContent = useMemo(() => {
+    // If we have streaming content, use it (it takes priority)
+    if (streamingContent) {
+      return streamingContent.content;
+    }
+    // Otherwise use the current document content
+    return currentDocument?.value || '';
+  }, [streamingContent?.content, currentDocument?.value]);
+
+  const editorLanguage = useMemo(() => {
+    // Determine language based on the active file
+    const activeFilePath = streamingContent?.filePath || currentDocument?.filePath;
+    if (!activeFilePath) return 'plaintext';
+    
+    const fileName = activeFilePath.split('/').pop() || '';
+    return getFileLanguage(fileName);
+  }, [streamingContent?.filePath, currentDocument?.filePath]);
+
+  const isReadOnly = useMemo(() => {
+    // Editor is read-only when streaming
+    return streamingContent !== null;
+  }, [streamingContent]);
 
   const activeFileSegments = useMemo(() => {
-    // Use streaming content file path if available and no current document
-    const activeFilePath = currentDocument?.filePath || streamingContent?.filePath;
+    // Use streaming content file path if available, otherwise current document
+    const activeFilePath = streamingContent?.filePath || currentDocument?.filePath;
     if (!activeFilePath) return [];
 
     // Ensure WORK_DIR is correctly used for relative path calculation
@@ -45,8 +67,12 @@ export function EditorPanel() {
       : activeFilePath.replace(/^\//, '');
 
     return [WORK_DIR.split('/').pop() || 'project', ...pathWithoutWorkDir.split('/')].filter(Boolean);
-  }, [currentDocument?.filePath, streamingContent?.filePath]);
+  }, [streamingContent?.filePath, currentDocument?.filePath]);
 
+  // Check if we have any content to show
+  const hasContent = useMemo(() => {
+    return (currentDocument?.filePath && currentDocument && !currentDocument.isBinary) || streamingContent;
+  }, [currentDocument, streamingContent]);
 
   return (
     <ResizablePanelGroup direction="horizontal" className="h-full min-h-0">
@@ -72,7 +98,6 @@ export function EditorPanel() {
           <TabsContent value="search" className="flex-1 overflow-auto mt-0">
             <SearchPanel />
           </TabsContent>
-
         </Tabs>
       </ResizablePanel>
       <ResizableHandle className="w-[1px] bg-[#313133]" />
@@ -96,21 +121,12 @@ export function EditorPanel() {
           )}
         </div>
         <div className="flex-1 relative min-h-0">
-          {((currentDocument?.filePath && currentDocument && !currentDocument.isBinary) || streamingContent) ? (
+          {hasContent ? (
             <CodeEditor2
-              value={
-                streamingContent &&
-                  (streamingContent.filePath === currentDocument?.filePath || !currentDocument?.filePath)
-                  ? streamingContent.content
-                  : currentDocument?.value || ''
-              }
+              value={editorContent}
               onChange={handleEditorChange}
-              language={
-                streamingContent && !currentDocument?.filePath
-                  ? getFileLanguage(streamingContent.filePath.split('/').pop() || '')
-                  : currentDocument?.language || 'plaintext'
-              }
-              readOnly={streamingContent !== null}
+              language={editorLanguage}
+              readOnly={isReadOnly}
             />
           ) : currentDocument?.isBinary ? (
             <div className="flex items-center justify-center h-full text-[#969798] text-sm">

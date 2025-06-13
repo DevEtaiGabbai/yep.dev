@@ -42,6 +42,7 @@ interface ChatPanelProps {
   completedCommands?: Set<string>;
   isInstallingDeps?: boolean;
   isStartingDevServer?: boolean;
+  isLoadingProjectFiles?: boolean;
   progress?: ProgressIndicator[];
   onModelChange?: (model: string) => void;
 }
@@ -325,7 +326,7 @@ export const ChatPanel = ({
   return (
     <div className="w-full flex flex-col h-full bg-[#101012] border-[#313133] shadow-lg overflow-hidden">
       <div className="relative flex-1 overflow-hidden">
-        {!hasLoadingStarted && <div className="flex justify-center"><Loader2 className="w-4 h-4 animate-spin" /></div>}
+        {!hasLoadingStarted && <div className="flex justify-center pt-2"><Loader2 className="w-4 h-4 animate-spin" /></div>}
         <ScrollArea className="h-full bg-[#101012]" ref={chatContainerRef}>
           <div className="py-8 px-4">
             <AnimatePresence>
@@ -334,6 +335,7 @@ export const ChatPanel = ({
                   <LoadingProgressPanel
                     isInstallingDeps={isInstallingDeps}
                     isStartingDevServer={isStartingDevServer}
+                    isLoadingExistingProject={(messages.length > 0 && !isInstallingDeps && !isStartingDevServer)}
                   />
                 )}
 

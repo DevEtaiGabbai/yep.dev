@@ -3,7 +3,7 @@ import { path } from '@/app/utils/path';
 import { toast } from '@/hooks/use-toast';
 import { WORK_DIR } from '@/lib/prompt';
 import type { WebContainer } from '@webcontainer/api';
-import { computed, map } from 'nanostores';
+import { map } from 'nanostores';
 
 // --- Types ---
 export interface ScrollPosition {
@@ -83,12 +83,10 @@ interface WorkbenchState {
     activePreviewUrl: string | null;
     activePreviewPort: number | null;
     showTerminal: boolean;
-    artifacts: Record<string, ArtifactState>;
+    // artifacts: Record<string, ArtifactState>;
     isProcessingArtifact: boolean;
     isLoadingFiles: boolean;
     fileLoadError: string | null;
-    fileHistory: Record<string, { originalContent: string; versions: Array<{ timestamp: number; content: string }> }>;
-    pendingAIChange: { filePath: string; newContent: string } | null;
     streamingContent: { filePath: string; content: string } | null;
 }
 
@@ -103,23 +101,21 @@ const initialWorkbenchState: WorkbenchState = {
     activePreviewUrl: null,
     activePreviewPort: null,
     showTerminal: true,
-    artifacts: {},
+    // artifacts: {},
     isProcessingArtifact: false,
     isLoadingFiles: false,
     fileLoadError: null,
-    fileHistory: {},
-    pendingAIChange: null,
     streamingContent: null,
 };
 
 export const $workbench = map<WorkbenchState>(initialWorkbenchState);
 
 // --- Selectors (derived state) ---
-export const $firstArtifact = computed($workbench, (wb) => {
-    const firstArtifactKey = Object.keys(wb.artifacts)[0];
-    return firstArtifactKey ? wb.artifacts[firstArtifactKey] : undefined;
-});
-export const $hasPreview = computed($workbench, (wb) => wb.previews.length > 0);
+// export const $firstArtifact = computed($workbench, (wb) => {
+//     const firstArtifactKey = Object.keys(wb.artifacts)[0];
+//     return firstArtifactKey ? wb.artifacts[firstArtifactKey] : undefined;
+// });
+// export const $hasPreview = computed($workbench, (wb) => wb.previews.length > 0);
 
 // --- Actions ---
 export const toggleWorkbench = (show?: boolean) => {
@@ -320,19 +316,9 @@ export const saveCurrentFile = async (wc: WebContainer | null) => {
                     ...currentStore.files,
                     [fullPath]: { ...fileEntry, content: doc.value },
                 };
-                const history = currentStore.fileHistory;
-                const currentFileHistory = history[fullPath] || { originalContent: fileEntry.content, versions: [] };
-                const updatedFileHistory = {
-                    ...history,
-                    [fullPath]: {
-                        originalContent: currentFileHistory.originalContent,
-                        versions: [...currentFileHistory.versions, { timestamp: Date.now(), content: doc.value }]
-                    }
-                };
                 $workbench.set({
                     ...currentStore,
                     files: updatedFiles,
-                    fileHistory: updatedFileHistory,
                     unsavedFiles: new Set([...currentStore.unsavedFiles].filter(p => p !== fullPath)),
                 });
             }
@@ -344,38 +330,6 @@ export const saveCurrentFile = async (wc: WebContainer | null) => {
         }
     }
     return false;
-};
-
-export const resetCurrentFile = () => {
-    const currentStore = $workbench.get();
-    const doc = currentStore.currentDocument;
-    if (doc && currentStore.files) {
-        const fileHistory = currentStore.fileHistory[doc.filePath];
-
-        if (fileHistory && fileHistory.originalContent) {
-            const unsaved = new Set(currentStore.unsavedFiles);
-            unsaved.delete(doc.filePath);
-
-            $workbench.set({
-                ...currentStore,
-                currentDocument: { ...doc, value: fileHistory.originalContent },
-                unsavedFiles: unsaved,
-            });
-
-            return;
-        }
-
-        const originalFile = currentStore.files[doc.filePath] as WorkbenchFile | undefined;
-        if (originalFile) {
-            const unsaved = new Set(currentStore.unsavedFiles);
-            unsaved.delete(doc.filePath);
-            $workbench.set({
-                ...currentStore,
-                currentDocument: { ...doc, value: originalFile.content },
-                unsavedFiles: unsaved,
-            });
-        }
-    }
 };
 
 export const setCurrentDocumentScroll = (scroll: ScrollPosition) => {
@@ -426,67 +380,6 @@ export const setActivePreview = (port: number | null, url: string | null) => {
 export const toggleTerminal = (show?: boolean) => {
     const currentShowState = $workbench.get().showTerminal;
     $workbench.setKey('showTerminal', show === undefined ? !currentShowState : show);
-};
-
-export const addArtifact = (artifactData: Omit<ArtifactState, 'actions' | 'closed'>) => {
-    const currentArtifacts = $workbench.get().artifacts;
-    if (!currentArtifacts[artifactData.messageId]) {
-        $workbench.setKey('artifacts', {
-            ...currentArtifacts,
-            [artifactData.messageId]: {
-                ...artifactData,
-                actions: {},
-                closed: false,
-            },
-        });
-    }
-};
-
-export const updateArtifact = (messageId: string, updates: Partial<Pick<ArtifactState, 'title' | 'closed' | 'type'>>) => {
-    const currentArtifacts = $workbench.get().artifacts;
-    const artifact = currentArtifacts[messageId];
-    if (artifact) {
-        $workbench.setKey('artifacts', {
-            ...currentArtifacts,
-            [messageId]: { ...artifact, ...updates },
-        });
-    }
-};
-
-export const addActionToArtifact = (messageId: string, actionId: string, action: Omit<ActionState, 'status' | 'error'>) => {
-    const currentArtifacts = $workbench.get().artifacts;
-    const artifact = currentArtifacts[messageId];
-    if (artifact && !artifact.actions[actionId]) {
-        const newAction: ActionState = { ...action, id: actionId, status: 'pending' };
-        $workbench.setKey('artifacts', {
-            ...currentArtifacts,
-            [messageId]: {
-                ...artifact,
-                actions: { ...artifact.actions, [actionId]: newAction },
-            },
-        });
-    }
-};
-
-export const updateActionState = (messageId: string, actionId: string, updates: Partial<ActionState>) => {
-    const currentArtifacts = $workbench.get().artifacts;
-    const artifact = currentArtifacts[messageId];
-    if (artifact && artifact.actions[actionId]) {
-        $workbench.setKey('artifacts', {
-            ...currentArtifacts,
-            [messageId]: {
-                ...artifact,
-                actions: {
-                    ...artifact.actions,
-                    [actionId]: { ...artifact.actions[actionId], ...updates },
-                },
-            },
-        });
-    }
-};
-
-export const setProcessingArtifact = (isProcessing: boolean) => {
-    $workbench.setKey('isProcessingArtifact', isProcessing);
 };
 
 // --- File Update / Creation from AI Actions ---
@@ -556,16 +449,6 @@ export const updateFileInWorkbench = async (filePath: string, content: string, w
         }
     }
 
-    const history = currentStore.fileHistory;
-    const originalContent = (currentFiles[normalizedFilePath] as WorkbenchFile)?.content || "";
-    const currentFileHistory = history[normalizedFilePath] || { originalContent, versions: [] };
-    $workbench.setKey('fileHistory', {
-        ...history,
-        [normalizedFilePath]: {
-            originalContent: currentFileHistory.versions.length === 0 ? originalContent : currentFileHistory.originalContent,
-            versions: [...currentFileHistory.versions, { timestamp: Date.now(), content }]
-        }
-    });
 };
 
 export const addDirectoryToWorkbench = async (dirPath: string, wc?: WebContainer | null) => {
@@ -599,32 +482,6 @@ export const addDirectoryToWorkbench = async (dirPath: string, wc?: WebContainer
     }
 };
 
-export const setPendingAIChange = (filePath: string, newContent: string) => {
-    const currentStore = $workbench.get();
-    const normalizedFilePath = filePath.startsWith(WORK_DIR) ? filePath : path.join(WORK_DIR, filePath.replace(/^\//, ''));
-
-    $workbench.setKey('pendingAIChange', { filePath: normalizedFilePath, newContent });
-    setWorkbenchView('Diff');
-    if (!currentStore.showWorkbench) {
-        toggleWorkbench(true);
-    }
-    toast({ title: "AI Suggestion Ready", description: `Review changes for ${path.basename(normalizedFilePath)} in the Diff panel.` });
-};
-
-export const acceptPendingAIChange = async (wc?: WebContainer | null) => {
-    const pendingChange = $workbench.get().pendingAIChange;
-    if (pendingChange) {
-        const normalizedPath = pendingChange.filePath.startsWith(WORK_DIR)
-            ? pendingChange.filePath
-            : path.join(WORK_DIR, pendingChange.filePath.replace(/^\//, ''));
-
-        await updateFileInWorkbench(normalizedPath, pendingChange.newContent, wc);
-        setSelectedFile(normalizedPath);
-        setWorkbenchView('Editor');
-        toast({ title: "AI Changes Applied", description: `Changes to ${path.basename(normalizedPath)} have been applied.` });
-    }
-};
-
 export const setStreamingContent = (filePath: string | null, content: string = '') => {
     $workbench.setKey('streamingContent', filePath ? { filePath, content } : null);
 
@@ -644,6 +501,17 @@ export const updateStreamingContent = (filePath: string, content: string) => {
 };
 
 export const clearStreamingContent = () => {
+    const currentStreamingContent = $workbench.get().streamingContent;
+
+    // If we had streaming content, ensure the file remains selected
+    if (currentStreamingContent) {
+        const streamingFilePath = currentStreamingContent.filePath;
+        // Keep the file selected after streaming ends
+        if ($workbench.get().selectedFile !== streamingFilePath) {
+            setSelectedFile(streamingFilePath);
+        }
+    }
+
     $workbench.setKey('streamingContent', null);
 };
 

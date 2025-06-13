@@ -118,7 +118,9 @@ export const useCloudFrontTemplate = (webContainerInstance: WebContainer | null,
   }, [webContainerInstance]);
 
   const initializeFiles = useCallback(async () => {
-    if (!templateUrl) return;
+    if (!templateUrl) {
+      return;
+    }
 
     setTemplateError(null);
 

@@ -3,7 +3,6 @@
 
 import {
     $workbench,
-    resetCurrentFile,
     saveCurrentFile,
     setSelectedFile,
     setWorkbenchView,
@@ -59,8 +58,6 @@ export function Workbench({
         files,
         previews,
         showTerminal: terminalVisible,
-        fileHistory,
-        pendingAIChange,
     } = workbenchState;
 
     const { webContainerInstance } = useWebContainer(mainTerminalRef);
@@ -141,13 +138,6 @@ export function Workbench({
             }
         }
     }, [webContainerInstance, currentDocument, projectId, session?.user?.id]);
-
-    const handleReset = useCallback(() => {
-        if (currentDocument) {
-            resetCurrentFile();
-            toast({ title: "File Reset", description: `${currentDocument.filePath.split('/').pop()} reset to last saved state.` });
-        }
-    }, [currentDocument]);
 
     useEffect(() => {
         if (previews.length > 0 && !$workbench.get().activePreviewUrl) {
@@ -234,7 +224,6 @@ export function Workbench({
                             <CodePreviewTabTrigger
                                 key={option.value}
                                 value={option.value}
-                                disabled={pendingAIChange && option.value !== 'Diff'}
                                 className="px-3 py-1 text-xs h-full data-[state=active]:bg-[#2a2a2c] data-[state=active]:text-white text-[#969798]"
                             >
                                 {option.label}
@@ -244,7 +233,7 @@ export function Workbench({
                 </CodePreviewTab>
 
                 <div className="flex items-center space-x-1.5 ml-2">
-                    {currentView === 'Editor' && currentDocument?.filePath && isCurrentFileUnsaved && !pendingAIChange && (
+                    {currentView === 'Editor' && currentDocument?.filePath && isCurrentFileUnsaved && (
                         <Button
                             variant="ghost"
                             size="sm"
@@ -254,14 +243,7 @@ export function Workbench({
                             <Icons.save className="h-3.5 w-3.5 mr-1" /> Save
                         </Button>
                     )}
-                    {/* <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={handleReset}
-                        className="text-xs h-7 px-2 text-[#c0c0c0] hover:text-white hover:bg-[#2a2a2c]"
-                    >
-                        <Icons.reset className="h-3.5 w-3.5 mr-1" /> Reset
-                    </Button> */}
+
                 </div>
 
                 <div className="ml-auto flex items-center space-x-1">
