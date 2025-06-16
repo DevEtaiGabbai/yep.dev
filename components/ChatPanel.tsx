@@ -110,7 +110,8 @@ export const ChatPanel = ({
   isInstallingDeps = false,
   isStartingDevServer = false,
   progress = [],
-  onModelChange
+  onModelChange,
+  isLoadingProjectFiles = false
 }: ChatPanelProps) => {
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -175,7 +176,7 @@ export const ChatPanel = ({
     }
   }, [model, webSearchEnabled, onModelChange]);
 
-  const hasLoadingStarted = isInstallingDeps || isStartingDevServer || projectHasBeenLoaded;
+  const hasLoadingStarted = isInstallingDeps || isStartingDevServer || projectHasBeenLoaded || isLoadingProjectFiles;
 
   useEffect(() => {
     if (isInstallingDeps || isStartingDevServer) {
@@ -336,6 +337,7 @@ export const ChatPanel = ({
                     isInstallingDeps={isInstallingDeps}
                     isStartingDevServer={isStartingDevServer}
                     isLoadingExistingProject={(messages.length > 0 && !isInstallingDeps && !isStartingDevServer)}
+                    isLoadingProjectFiles={isLoadingProjectFiles}
                   />
                 )}
 

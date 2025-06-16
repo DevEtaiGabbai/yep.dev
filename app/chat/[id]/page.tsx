@@ -80,6 +80,10 @@ function Workspace() {
   const terminalStoreManager = getTerminalStore();
   const mainTerminalRef = useRef<TerminalRef | null>(null);
   const workbenchState = $workbench.get();
+
+  const projectFilesLoadedRef = useRef(false);
+  const lastLoadedProjectIdRef = useRef<string | null>(null);
+  const [projectFilesLoaded, setProjectFilesLoaded] = useState(false);
   const {
     files: filesFromStore,
     selectedFile: currentSelectedFileInStore,
@@ -316,11 +320,7 @@ function Workspace() {
 
   }, [session?.user?.id, conversationId, projectId, isCreatingProject]);
 
-  // Load project files from database instead of recreating from messages
   // Track if project files have been loaded to prevent reloading after AI updates
-  const projectFilesLoadedRef = useRef(false);
-  const lastLoadedProjectIdRef = useRef<string | null>(null);
-
   useEffect(() => {
     if (!webContainerInstance || !conversationLoaded || !projectId) return;
 
@@ -328,6 +328,7 @@ function Workspace() {
     if (lastLoadedProjectIdRef.current !== projectId) {
       projectFilesLoadedRef.current = false;
       lastLoadedProjectIdRef.current = projectId;
+      setProjectFilesLoaded(false);
     }
 
     if (projectFilesLoadedRef.current) return; // Prevent reloading after initial load
@@ -339,6 +340,7 @@ function Workspace() {
         if (!response.ok) {
           setShouldLoadTemplate(true);
           projectFilesLoadedRef.current = true;
+          setProjectFilesLoaded(true); // Mark as loaded even if no files
           return;
         }
 
@@ -388,10 +390,12 @@ function Workspace() {
         }
 
         projectFilesLoadedRef.current = true; // Mark as loaded
+        setProjectFilesLoaded(true);
       } catch (error) {
         console.error("Error loading project files:", error);
         setShouldLoadTemplate(true);
-        projectFilesLoadedRef.current = true; // Mark as loaded even on error to prevent retries
+        projectFilesLoadedRef.current = true;
+        setProjectFilesLoaded(true);
       }
     };
 
@@ -399,6 +403,7 @@ function Workspace() {
     const timeoutId = setTimeout(loadProjectFiles, 500);
     return () => clearTimeout(timeoutId);
   }, [webContainerInstance, conversationLoaded, projectId]);
+
 
   // Handle Template Errors and Template Fallback
   useEffect(() => {

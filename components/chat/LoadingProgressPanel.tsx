@@ -8,12 +8,14 @@ interface LoadingProgressPanelProps {
   isInstallingDeps: boolean;
   isStartingDevServer: boolean;
   isLoadingExistingProject?: boolean;
+  isLoadingProjectFiles?: boolean;
 }
 
 export const LoadingProgressPanel = ({
   isInstallingDeps,
   isStartingDevServer,
-  isLoadingExistingProject = false
+  isLoadingExistingProject = false,
+  isLoadingProjectFiles = false
 }: LoadingProgressPanelProps) => {
   return (
     <motion.div
@@ -28,7 +30,7 @@ export const LoadingProgressPanel = ({
         </div>
         <div className="flex-1">
           <div className="text-sm text-[#f3f6f6] mb-4">
-            {isLoadingExistingProject 
+            {isLoadingExistingProject
               ? "I'm loading your existing project. This may take a moment as I retrieve your files."
               : "I'm importing your project into the WebContainer. This may take a moment as I set everything up."
             }
@@ -42,13 +44,29 @@ export const LoadingProgressPanel = ({
               <ul className="list-none space-y-4">
                 <li>
                   <div className="flex items-center gap-2 mb-1 text-sm">
-                    <div
-                      className="h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center"
-                    >
-                      <Check className="h-3 w-3 text-blue-400" />
-                    </div>
+                    {/* Project files loading status */}
+                    {isLoadingProjectFiles === true ? (
+                      <div
+                        className="h-5 w-5 rounded-full border-2 border-t-transparent border-blue-400 animate-spin"
+                      />
+                    ) : isLoadingProjectFiles === false ? (
+                      <div
+                        className="h-5 w-5 rounded-full bg-blue-500/20 flex items-center justify-center"
+                      >
+                        <Check className="h-3 w-3 text-blue-400" />
+                      </div>
+                    ) : (
+                      <div className="h-5 w-5 rounded-full border border-[#313133] flex items-center justify-center">
+                        <div className="h-2 w-2 rounded-full bg-[#313133]" />
+                      </div>
+                    )}
 
-                    <div className={cn("text-[#f3f6f6]"
+                    <div className={cn(
+                      isLoadingProjectFiles === true
+                        ? "text-blue-400"
+                        : isLoadingProjectFiles === false
+                          ? "text-[#f3f6f6]"
+                          : "text-[#969798]"
                     )}>
                       {isLoadingExistingProject ? "Loading existing project files" : "Loading project files"}
                     </div>

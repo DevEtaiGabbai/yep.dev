@@ -114,8 +114,6 @@ export const useAIChat = (
 	const setDirectoryActionsCallback = useCallback((cb: DirectoryActionCallback) => { directoryActionsCallbackRef.current = cb; }, []);
 	const setTerminalActionsCallback = useCallback((cb: TerminalActionCallback) => { terminalActionsCallbackRef.current = cb; }, []);
 
-	const processedFilesRef = useRef<Set<string>>(new Set());
-
 	useEffect(() => {
 		if (initialMessagesProp) {
 			const transformed = initialMessagesProp.map(m => ({ role: m.role, content: m.content }));
@@ -183,127 +181,6 @@ export const useAIChat = (
 		}
 	}, []);
 
-	const updateStreamingContentFromRaw = useCallback((rawContent: string) => {
-		let narrativeContent = '';
-
-		const firstBoltMatch = rawContent.match(/<bolt[A-Z]/);
-		if (firstBoltMatch && firstBoltMatch.index > 0) {
-			narrativeContent = rawContent.substring(0, firstBoltMatch.index).trim();
-		}
-
-		if (!narrativeContent && rawContent.includes('<boltArtifact')) {
-			const titleMatch = rawContent.match(/<boltArtifact\s+[^>]*title="([^"]+)"/);
-			if (titleMatch) {
-				narrativeContent = titleMatch[1];
-			}
-		}
-
-		if (!narrativeContent) {
-			const incompleteBoltRegex = /<bolt[^>]*[\s\S]*$/;
-			const incompleteMatch = rawContent.match(incompleteBoltRegex);
-			if (incompleteMatch && incompleteMatch.index > 0) {
-				narrativeContent = rawContent.substring(0, incompleteMatch.index).trim();
-			}
-		}
-
-		if (!narrativeContent && (rawContent.includes('<boltAction') || rawContent.includes('<boltArtifact'))) {
-			const fileActions = [];
-			const fileActionRegex = /<boltAction\s+type="file"\s+filePath="([^"]+)"/g;
-			let match;
-			while ((match = fileActionRegex.exec(rawContent)) !== null) {
-				const filePath = match[1].split('/').pop() || match[1];
-				fileActions.push(filePath);
-			}
-
-			if (fileActions.length > 0) {
-				if (fileActions.length === 1) {
-					narrativeContent = `Created ${fileActions[0]}`;
-				} else {
-					const lastFile = fileActions.pop();
-					narrativeContent = `Created ${fileActions.join(', ')} and ${lastFile}`;
-				}
-			} else {
-				narrativeContent = "Processing...";
-			}
-		}
-
-		if (!narrativeContent) {
-			narrativeContent = rawContent
-				.replace(/<boltArtifact\s+[^>]*>[\s\S]*?<\/boltArtifact>/g, '')
-				.replace(/<boltAction\s+[^>]*>[\s\S]*?<\/boltAction>/g, '')
-				.replace(/<bolt[^>]*[\s\S]*$/, '')
-				.trim();
-		}
-
-		const allCompletedFileActions = [];
-		const completedActionRegex = /<boltAction\s+type="file"\s+filePath="([^"]+)"[^>]*>[\s\S]*?<\/boltAction>/g;
-		let completedMatch;
-		while ((completedMatch = completedActionRegex.exec(rawContent)) !== null) {
-			let filePath = completedMatch[1];
-			let normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-			let fullFilePath = filePath;
-
-			if (normalizedPath.startsWith('home/project/')) {
-				fullFilePath = '/' + normalizedPath;
-			} else if (normalizedPath.startsWith('project/')) {
-				fullFilePath = '/home/' + normalizedPath;
-			} else {
-				if (!fullFilePath.startsWith('/')) fullFilePath = '/' + fullFilePath;
-				fullFilePath = WORK_DIR + fullFilePath;
-			}
-			allCompletedFileActions.push(fullFilePath);
-		}
-
-		const newlyCompletedFiles = allCompletedFileActions.filter(filePath =>
-			!processedFilesRef.current.has(filePath)
-		);
-
-		if (newlyCompletedFiles.length > 0) {
-			newlyCompletedFiles.forEach(filePath => processedFilesRef.current.add(filePath));
-			setCompletedFilesDisplay(prev => new Set([...prev, ...newlyCompletedFiles]));
-		}
-
-		const streamingActionRegex = /<boltAction\s+type="file"\s+filePath="([^"]+)"[^>]*>/g;
-		let lastMatch;
-		let match;
-
-		while ((match = streamingActionRegex.exec(rawContent)) !== null) {
-			lastMatch = match;
-		}
-
-		if (lastMatch) {
-			const filePath = lastMatch[1];
-			const actionStartIndex = lastMatch.index + lastMatch[0].length;
-
-			let normalizedPath = filePath.startsWith('/') ? filePath.substring(1) : filePath;
-			let fullFilePath = filePath;
-
-			if (normalizedPath.startsWith('home/project/')) {
-				fullFilePath = '/' + normalizedPath;
-			} else if (normalizedPath.startsWith('project/')) {
-				fullFilePath = '/home/' + normalizedPath;
-			} else {
-				if (!fullFilePath.startsWith('/')) fullFilePath = '/' + fullFilePath;
-				fullFilePath = WORK_DIR + fullFilePath;
-			}
-
-			const closeTagIndex = rawContent.indexOf('</boltAction>', actionStartIndex);
-
-			if (closeTagIndex === -1) {
-				const contentSoFar = rawContent.substring(actionStartIndex);
-				const decodedContent = he.decode(contentSoFar);
-				updateStreamingContent(fullFilePath, decodedContent);
-				setActiveFile(fullFilePath);
-			} else {
-				setActiveFile(null);
-			}
-		} else if (newlyCompletedFiles.length > 0) {
-			setActiveFile(null);
-		}
-
-		return narrativeContent;
-	}, []);
-
 	const saveAssistantMessageToDB = useCallback(async (content: string) => {
 		if (!conversationId) return;
 		try {
@@ -330,44 +207,97 @@ export const useAIChat = (
 		}
 	}, []);
 
-	const parseAndExecuteActions = useCallback(async (
-		cleanContentForDisplay: string,
+	const parseStreamContent = useCallback(async (
+		rawContent: string,
 		isFinalParse: boolean
-	) => {
+	): Promise<string> => {
 		const state = fileExtractionStateRef.current;
-		const rawStreamForActions = cleanContentForDisplay;
-		let searchStartIndexForActions = state.lastScanLength;
+		let searchStartIndex = isFinalParse ? 0 : state.lastScanLength;
 
+		// Extract narrative content first (before bolt tags)
+		let narrativeContent = '';
+		const firstBoltMatch = rawContent.match(/<bolt[A-Z]/);
+		if (firstBoltMatch && firstBoltMatch.index > 0) {
+			narrativeContent = rawContent.substring(0, firstBoltMatch.index).trim();
+		}
+
+		if (!narrativeContent && rawContent.includes('<boltArtifact')) {
+			const titleMatch = rawContent.match(/<boltArtifact\s+[^>]*title="([^"]+)"/);
+			if (titleMatch) {
+				narrativeContent = titleMatch[1];
+			}
+		}
+
+		if (!narrativeContent) {
+			const incompleteBoltRegex = /<bolt[^>]*[\s\S]*$/;
+			const incompleteMatch = rawContent.match(incompleteBoltRegex);
+			if (incompleteMatch && incompleteMatch.index > 0) {
+				narrativeContent = rawContent.substring(0, incompleteMatch.index).trim();
+			}
+		}
+
+		// If still no narrative, extract from actions for display
+		if (!narrativeContent && (rawContent.includes('<boltAction') || rawContent.includes('<boltArtifact'))) {
+			const fileActions = [];
+			const fileActionRegex = /<boltAction\s+type="file"\s+filePath="([^"]+)"/g;
+			let match;
+			while ((match = fileActionRegex.exec(rawContent)) !== null) {
+				const filePath = match[1].split('/').pop() || match[1];
+				fileActions.push(filePath);
+			}
+
+			if (fileActions.length > 0) {
+				if (fileActions.length === 1) {
+					narrativeContent = `Created ${fileActions[0]}`;
+				} else {
+					const lastFile = fileActions.pop();
+					narrativeContent = `Created ${fileActions.join(', ')} and ${lastFile}`;
+				}
+			} else {
+				narrativeContent = "Processing...";
+			}
+		}
+
+		// Fallback narrative content
+		if (!narrativeContent) {
+			narrativeContent = rawContent
+				.replace(/<boltArtifact\s+[^>]*>[\s\S]*?<\/boltArtifact>/g, '')
+				.replace(/<boltAction\s+[^>]*>[\s\S]*?<\/boltAction>/g, '')
+				.replace(/<bolt[^>]*[\s\S]*$/, '')
+				.trim();
+		}
+
+		// Reset state for final parse
 		if (isFinalParse) {
 			state.completedFiles.clear();
 			state.completedCommands.clear();
-			searchStartIndexForActions = 0;
+			searchStartIndex = 0;
 		}
 
+		// Process actions
 		const maxIterations = 500;
 		let iterations = 0;
 		let filesCreatedOrModified = false;
-		let foundBoltFileActions = false;
-		let foundAnyBoltActions = false;
+		let foundBoltActions = false;
 
-		while (iterations++ < maxIterations && searchStartIndexForActions < rawStreamForActions.length) {
+		while (iterations++ < maxIterations && searchStartIndex < rawContent.length) {
 			if (!state.insideAction) {
-				const actionTagOpenIndex = rawStreamForActions.indexOf(BOLT_ACTION_TAG_OPEN, searchStartIndexForActions);
+				const actionTagOpenIndex = rawContent.indexOf(BOLT_ACTION_TAG_OPEN, searchStartIndex);
 				if (actionTagOpenIndex === -1) break;
 
-				foundAnyBoltActions = true;
+				foundBoltActions = true;
 
-				const tagEndIndex = rawStreamForActions.indexOf('>', actionTagOpenIndex);
+				const tagEndIndex = rawContent.indexOf('>', actionTagOpenIndex);
 				if (tagEndIndex === -1) {
-					searchStartIndexForActions = actionTagOpenIndex;
+					searchStartIndex = actionTagOpenIndex;
 					break;
 				}
 
-				const tagFullContent = rawStreamForActions.substring(actionTagOpenIndex, tagEndIndex + 1);
+				const tagFullContent = rawContent.substring(actionTagOpenIndex, tagEndIndex + 1);
 				const actionType = extractAttribute(tagFullContent, 'type');
 
 				if (!actionType) {
-					searchStartIndexForActions = tagEndIndex + 1;
+					searchStartIndex = tagEndIndex + 1;
 					continue;
 				}
 
@@ -376,27 +306,26 @@ export const useAIChat = (
 				state.currentActionStartIndex = tagEndIndex + 1;
 
 				if (actionType === 'file') {
-					foundBoltFileActions = true;
 					let filePath = extractAttribute(tagFullContent, 'filePath') || '';
-					if (!filePath) { 
-						state.insideAction = false; 
-						searchStartIndexForActions = tagEndIndex + 1; 
-						continue; 
+					if (!filePath) {
+						state.insideAction = false;
+						searchStartIndex = tagEndIndex + 1;
+						continue;
 					}
 
 					filePath = normalizeFilePath(filePath);
 					state.actionFilePath = filePath;
 					state.accumulatedFileContent = '';
-					
+
 					if (!state.completedFiles.has(filePath) && !isFinalParse) {
 						setActiveFile(filePath);
 					}
 				} else if (actionType === 'directory') {
 					let dirPath = extractAttribute(tagFullContent, 'dirPath') || '';
-					if (!dirPath) { 
-						state.insideAction = false; 
-						searchStartIndexForActions = tagEndIndex + 1; 
-						continue; 
+					if (!dirPath) {
+						state.insideAction = false;
+						searchStartIndex = tagEndIndex + 1;
+						continue;
 					}
 
 					dirPath = normalizeFilePath(dirPath);
@@ -405,21 +334,21 @@ export const useAIChat = (
 						pendingActionsRef.current.directories.push(dirPath);
 						state.completedFiles.add(dirPath);
 					} else if (directoryActionsCallbackRef.current) {
-						try { 
-							await directoryActionsCallbackRef.current(dirPath); 
-						} catch (e) { 
-							console.error(e); 
+						try {
+							await directoryActionsCallbackRef.current(dirPath);
+						} catch (e) {
+							console.error(e);
 						}
 					}
 
 					state.insideAction = false;
 				}
-				searchStartIndexForActions = tagEndIndex + 1;
+				searchStartIndex = tagEndIndex + 1;
 			} else {
-				const actionCloseTagIndex = rawStreamForActions.indexOf(BOLT_ACTION_TAG_CLOSE, state.currentActionStartIndex);
+				const actionCloseTagIndex = rawContent.indexOf(BOLT_ACTION_TAG_CLOSE, state.currentActionStartIndex);
 				if (actionCloseTagIndex === -1) {
 					if (state.actionType === 'file') {
-						const newContentChunk = rawStreamForActions.substring(searchStartIndexForActions);
+						const newContentChunk = rawContent.substring(searchStartIndex);
 						state.accumulatedFileContent += newContentChunk;
 
 						if (state.actionFilePath && !isFinalParse) {
@@ -427,15 +356,15 @@ export const useAIChat = (
 							updateStreamingContent(state.actionFilePath, decodedStreamingContent);
 						}
 					}
-					searchStartIndexForActions = rawStreamForActions.length;
+					searchStartIndex = rawContent.length;
 					break;
 				}
 
 				let actionContentRaw = "";
 				if (state.actionType === 'file') {
-					actionContentRaw = state.accumulatedFileContent + rawStreamForActions.substring(state.currentActionStartIndex, actionCloseTagIndex);
+					actionContentRaw = state.accumulatedFileContent + rawContent.substring(state.currentActionStartIndex, actionCloseTagIndex);
 				} else {
-					actionContentRaw = rawStreamForActions.substring(state.currentActionStartIndex, actionCloseTagIndex);
+					actionContentRaw = rawContent.substring(state.currentActionStartIndex, actionCloseTagIndex);
 				}
 				const decodedActionContent = he.decode(actionContentRaw.trim());
 
@@ -496,17 +425,18 @@ export const useAIChat = (
 				state.actionType = null;
 				state.actionFilePath = null;
 				state.accumulatedFileContent = '';
-				searchStartIndexForActions = actionCloseTagIndex + BOLT_ACTION_TAG_CLOSE.length;
+				searchStartIndex = actionCloseTagIndex + BOLT_ACTION_TAG_CLOSE.length;
 				state.currentActionStartIndex = -1;
 			}
 		}
-		state.lastScanLength = searchStartIndexForActions;
+		state.lastScanLength = searchStartIndex;
 
-		if (isFinalParse && !foundAnyBoltActions) {
+		// Handle fallback markdown code blocks only on final parse if no bolt actions found
+		if (isFinalParse && !foundBoltActions) {
 			const markdownCodeBlockRegex = /^\s*(?:(?:(?:\/\/|\#)\s*([a-zA-Z0-9_\-\\.\\/]+\\.[a-zA-Z0-9_]+)\s*(?:\r\n|\n|\r)\s*)?```)(?:([a-zA-Z0-9_\-\\.]+)\s*(?:\r\n|\n|\r))?([\s\S]*?)(?:\r\n|\n|\r)```/gm;
 			let match;
 
-			while ((match = markdownCodeBlockRegex.exec(cleanContentForDisplay)) !== null) {
+			while ((match = markdownCodeBlockRegex.exec(rawContent)) !== null) {
 				const pathFromCommentBeforeFences = match[1]?.trim();
 				const lang = match[2]?.trim()?.toLowerCase();
 				let blockContent = match[3].trim();
@@ -552,7 +482,6 @@ export const useAIChat = (
 							} else {
 								try {
 									await fileActionsCallbackRef.current(filePath, finalContent);
-									
 									filesCreatedOrModified = true;
 									state.completedFiles.add(filePath);
 								} catch (e) {
@@ -565,49 +494,37 @@ export const useAIChat = (
 			}
 		}
 
+		// Handle final parse completion
 		if (isFinalParse) {
-			let narrativeContent = '';
-			const firstBoltTagMatch = cleanContentForDisplay.match(/<bolt[A-Z]/);
-			if (firstBoltTagMatch) {
-				narrativeContent = cleanContentForDisplay.substring(0, firstBoltTagMatch.index).trim();
-			} else {
-				narrativeContent = cleanContentForDisplay.trim();
-			}
-
-			if (!narrativeContent) {
-				const titleMatch = cleanContentForDisplay.match(/<boltArtifact\s+[^>]*title="([^"]+)"/);
-				if (titleMatch) {
-					narrativeContent = titleMatch[1];
-				}
-			}
-
-			let cleanContentForDB = narrativeContent;
+			let contentForDB = narrativeContent;
 
 			if (state.completedFiles.size > 0) {
 				const fileMessages = Array.from(state.completedFiles).map(filePath => {
 					const relativePath = filePath.replace(/^\/home\/project\//, '').replace(/^\//, '');
-					const linkPath = filePath;
-					return `[Updated ${relativePath}](file://${linkPath})`;
+					return `[Updated ${relativePath}](file://${filePath})`;
 				});
 
-				if (cleanContentForDB) {
-					cleanContentForDB = cleanContentForDB + '\n\n' + fileMessages.join('\n');
+				if (contentForDB) {
+					contentForDB = contentForDB + '\n\n' + fileMessages.join('\n');
 				} else {
-					cleanContentForDB = fileMessages.join('\n');
+					contentForDB = fileMessages.join('\n');
 				}
 			}
 
-			if (cleanContentForDB) {
-				await saveAssistantMessageToDB(cleanContentForDB);
+			if (contentForDB) {
+				await saveAssistantMessageToDB(contentForDB);
 			}
 
+			// Sync files to project
 			if (filesCreatedOrModified && isFinalParse) {
 				setTimeout(() => syncFilesToProject(), 1000);
 			}
 
+			// Update display state
 			setCompletedFilesDisplay(new Set(state.completedFiles));
 			setCompletedCommandsDisplay(new Set(state.completedCommands));
 
+			// Select first file for editing
 			if (state.completedFiles.size > 0 && setSelectedFileInEditor) {
 				const firstFile = Array.from(state.completedFiles)[0];
 				setSelectedFileInEditor(firstFile);
@@ -615,11 +532,26 @@ export const useAIChat = (
 			}
 			setActiveFile(null);
 			setActiveCommand(null);
+
+			// Return content with file links for display
+			const fileMessages = Array.from(state.completedFiles).map(filePath => {
+				const relativePath = filePath.replace(/^\/home\/project\//, '').replace(/^\//, '');
+				return `[Updated ${relativePath}](file://${filePath})`;
+			});
+
+			if (narrativeContent && fileMessages.length > 0) {
+				return narrativeContent + '\n\n' + fileMessages.join('\n');
+			} else if (fileMessages.length > 0) {
+				return fileMessages.join('\n');
+			}
 		}
+
+		return narrativeContent;
 	}, [
 		webContainerInstance, setSelectedFileInEditor, setWorkbenchView,
 		fileActionsCallbackRef, directoryActionsCallbackRef, terminalActionsCallbackRef,
-		runTerminalCommand, saveAssistantMessageToDB, syncFilesToProject, normalizeFilePath
+		runTerminalCommand, saveAssistantMessageToDB, syncFilesToProject, normalizeFilePath,
+		extractAttribute
 	]);
 
 	const processSSEStream = useCallback(async (reader: ReadableStreamDefaultReader<Uint8Array>, decoder: TextDecoder) => {
@@ -633,30 +565,7 @@ export const useAIChat = (
 				done = doneReading;
 
 				if (done) {
-					await parseAndExecuteActions(accumulatedJsonLineBuffer, true);
-
-					const finalCompletedFiles = new Set(fileExtractionStateRef.current.completedFiles);
-
-					const finalNarrativeContent = updateStreamingContentFromRaw(accumulatedJsonLineBuffer);
-					console.log(`[processSSEStream] Final narrative content:`, finalNarrativeContent);
-
-					let finalDisplayContent = finalNarrativeContent || '';
-
-					if (finalCompletedFiles && finalCompletedFiles.size > 0) {
-						const fileMessages = Array.from(finalCompletedFiles).map(filePath => {
-							const relativePath = filePath.replace(/^\/home\/project\//, '').replace(/^\//, '');
-							return `[Updated ${relativePath}](file://${filePath})`;
-						});
-
-						console.log(`[processSSEStream] Created file messages:`, fileMessages);
-
-						if (finalDisplayContent) {
-							finalDisplayContent += '\n\n' + fileMessages.join('\n');
-						} else {
-							finalDisplayContent = fileMessages.join('\n');
-						}
-					}
-
+					const finalDisplayContent = await parseStreamContent(accumulatedJsonLineBuffer, true);
 					console.log(`[processSSEStream] Final display content:`, finalDisplayContent);
 
 					if (finalDisplayContent) {
@@ -664,7 +573,7 @@ export const useAIChat = (
 							const updated = [...prev];
 							if (updated.length > 0 && updated[updated.length - 1].role === 'assistant') {
 								updated[updated.length - 1].content = finalDisplayContent;
-								console.log(`Updated final assistant message with complete content, length: ${finalDisplayContent.length}, files: ${finalCompletedFiles?.size || 0}`);
+								console.log(`Updated final assistant message with complete content, length: ${finalDisplayContent.length}`);
 							}
 							return updated;
 						});
@@ -762,7 +671,8 @@ export const useAIChat = (
 					if (newCleanTextInChunkForDisplay.length > 0) {
 						accumulatedJsonLineBuffer += newCleanTextInChunkForDisplay;
 
-						const narrativeContent = updateStreamingContentFromRaw(accumulatedJsonLineBuffer);
+						// Single unified parsing - no duplication
+						const narrativeContent = await parseStreamContent(accumulatedJsonLineBuffer, false);
 
 						setMessages(prev => {
 							const updated = [...prev];
@@ -774,8 +684,6 @@ export const useAIChat = (
 							}
 							return updated;
 						});
-
-						await parseAndExecuteActions(accumulatedJsonLineBuffer, false);
 
 						const errorPatterns = [
 							/Custom error:\s*(.*)/i,
@@ -825,7 +733,7 @@ export const useAIChat = (
 				});
 			}
 
-			await parseAndExecuteActions(accumulatedJsonLineBuffer, true);
+			await parseStreamContent(accumulatedJsonLineBuffer, true);
 		} finally {
 			console.log("Stream processing complete, setting final states");
 			setStreamingComplete(true);
@@ -902,7 +810,7 @@ export const useAIChat = (
 				completedCommands: new Set<string>(),
 			};
 		}
-	}, [parseAndExecuteActions, processSpecialContent, setSelectedFileInEditor, setInput]);
+	}, [parseStreamContent, processSpecialContent, setSelectedFileInEditor, setInput]);
 
 	const commonSendMessageSetup = () => {
 		setIsApiRequestInProgress(true);
@@ -930,14 +838,12 @@ export const useAIChat = (
 			commands: []
 		};
 
-		processedFilesRef.current.clear();
-
 		lastRequestIdRef.current = Date.now().toString() + Math.random().toString(36).slice(2, 9);
 
 		if (typeof window !== 'undefined') {
 			const event = new CustomEvent('aiStreamingStateChange', {
-					detail: { isStreaming: true, isProcessing: true }
-				});
+				detail: { isStreaming: true, isProcessing: true }
+			});
 			window.dispatchEvent(event);
 		}
 	};
